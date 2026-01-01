@@ -1,14 +1,15 @@
+import clsx from "clsx";
+import { FiTrash2 } from "solid-icons/fi";
 import {
   type Component,
-  createSignal,
   createEffect,
   createMemo,
+  createSignal,
   onCleanup,
   onMount,
   Show,
 } from "solid-js";
-import { FiTrash2 } from "solid-icons/fi";
-import { createAudioPipeline, type AudioPipeline } from "~/lib/audio/pipeline";
+import { type AudioPipeline, createAudioPipeline } from "~/lib/audio/pipeline";
 import { useProject } from "~/lib/project/context";
 import styles from "./Track.module.css";
 
@@ -72,7 +73,7 @@ export const Track: Component<TrackProps> = (props) => {
     }
   });
 
-  const handleClear = () => {
+  function handleClear() {
     const el = playbackEl();
     if (el) {
       el.pause();
@@ -81,22 +82,22 @@ export const Track: Component<TrackProps> = (props) => {
     setPlaybackEl(null);
     pipeline?.disconnect();
     props.onClear?.();
-  };
+  }
 
-  const handleVolumeChange = (e: Event) => {
+  function handleVolumeChange(e: Event) {
     const value = parseFloat((e.target as HTMLInputElement).value);
     project.setTrackGain(trackId, value);
     pipeline?.setVolume(value);
-  };
+  }
 
-  const handlePanChange = (e: Event) => {
+  function handlePanChange(e: Event) {
     const value = parseFloat((e.target as HTMLInputElement).value);
     // Store as 0-1 in lexicon format
     project.setTrackPan(trackId, (value + 1) / 2);
     pipeline?.setPan(value);
-  };
+  }
 
-  const setupPlayback = (el: HTMLVideoElement) => {
+  function setupPlayback(el: HTMLVideoElement) {
     el.onloadeddata = () => {
       setPlaybackEl(el);
       if (pipeline) {
@@ -104,34 +105,37 @@ export const Track: Component<TrackProps> = (props) => {
       }
       props.onVideoChange?.(props.id, el);
     };
-  };
+  }
 
   const recordingUrl = createMemo(() => {
     const blob = trackBlob();
     return blob ? URL.createObjectURL(blob) : undefined;
   });
 
-  const getStatus = () => {
+  function getStatus() {
     if (props.isLoading) return "Loading...";
     if (props.isRecording) return "Recording";
     if (props.isSelected) return "Preview";
     if (props.isPlaying && hasRecording()) return "Playing";
     if (hasRecording()) return "Ready";
     return "Empty";
-  };
+  }
 
   // Convert 0-1 lexicon pan to -1..1 for slider
   const panSliderValue = createMemo(() => (pan() - 0.5) * 2);
 
   return (
     <div
-      class={styles.track}
-      classList={{
-        [styles.selected]: props.isSelected,
-        [styles.recording]: props.isRecording,
-        [styles.hasRecording]: hasRecording(),
-      }}
+      role="button"
+      tabIndex={0}
+      class={clsx(
+        styles.track,
+        props.isSelected && styles.selected,
+        props.isRecording && styles.recording,
+        hasRecording() && styles.hasRecording,
+      )}
       onClick={props.onSelect}
+      onKeyDown={(event) => event.code === "Enter" && props.onSelect?.()}
     >
       <div class={styles.trackHeader}>
         <span class={styles.trackLabel}>Track {props.id + 1}</span>
@@ -139,13 +143,17 @@ export const Track: Component<TrackProps> = (props) => {
       </div>
 
       {/* Hidden video element for playback */}
-      <Show when={hasRecording()}>
-        <video
-          ref={setupPlayback}
-          src={recordingUrl()}
-          class={styles.hiddenVideo}
-          playsinline
-        />
+      <Show when={hasRecording() && recordingUrl()}>
+        {(url) => (
+          <video
+            ref={setupPlayback}
+            src={url()}
+            class={styles.hiddenVideo}
+            playsinline
+          >
+            <track kind="captions"></track>
+          </video>
+        )}
       </Show>
 
       <div class={styles.sliders}>
@@ -178,6 +186,7 @@ export const Track: Component<TrackProps> = (props) => {
       <Show when={hasRecording()}>
         <div class={styles.controls}>
           <button
+            type="button"
             class={styles.clearButton}
             onClick={(e) => {
               e.stopPropagation();

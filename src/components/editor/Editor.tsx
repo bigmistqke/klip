@@ -10,17 +10,18 @@ import {
 import {
   type Component,
   createEffect,
+  createSelector,
   createSignal,
   For,
   onCleanup,
   onMount,
   Show,
 } from "solid-js";
+import { useAuth } from "~/lib/atproto/AuthContext";
+import { publishProject } from "~/lib/atproto/records";
 import { resumeAudioContext } from "~/lib/audio/context";
 import { getMasterMixer } from "~/lib/audio/mixer";
 import { createRecorder, requestMediaAccess } from "~/lib/audio/recorder";
-import { useAuth } from "~/lib/atproto/AuthContext";
-import { publishProject } from "~/lib/atproto/records";
 import { useProject } from "~/lib/project/context";
 import { type Compositor, createCompositor } from "~/lib/video/compositor";
 import styles from "./Editor.module.css";
@@ -65,10 +66,12 @@ export const Editor: Component<EditorProps> = (props) => {
     }
   });
 
-  const startPreview$ = useAction(startPreviewAction);
+  const xstartPreview$ = useAction(startPreviewAction);
   const stopRecording$ = useAction(stopRecordingAction);
   const previewSubmission = useSubmission(startPreviewAction);
   const stopRecordingSubmission = useSubmission(stopRecordingAction);
+
+  const isSelectedTrack = createSelector(selectedTrack);
 
   let compositorContainer: HTMLDivElement | undefined;
   let compositor: Compositor | null = null;
@@ -95,22 +98,22 @@ export const Editor: Component<EditorProps> = (props) => {
     compositor?.destroy();
   });
 
-  const startRenderLoop = () => {
+  function startRenderLoop() {
     const loop = () => {
       compositor?.render();
       animationId = requestAnimationFrame(loop);
     };
     loop();
-  };
+  }
 
-  const stopRenderLoop = () => {
+  function stopRenderLoop() {
     if (animationId) {
       cancelAnimationFrame(animationId);
       animationId = null;
     }
-  };
+  }
 
-  const setupPreviewStream = (mediaStream: MediaStream, trackIndex: number) => {
+  function setupPreviewStream(mediaStream: MediaStream, trackIndex: number) {
     stream = mediaStream;
     previewVideo = document.createElement("video");
     previewVideo.srcObject = stream;
@@ -118,16 +121,16 @@ export const Editor: Component<EditorProps> = (props) => {
     previewVideo.playsInline = true;
     previewVideo.play();
     compositor?.setVideo(trackIndex, previewVideo);
-  };
+  }
 
-  const startPreview = async (trackIndex: number) => {
+  async function startPreview(trackIndex: number) {
     const result = await startPreview$();
     if (result) {
       setupPreviewStream(result, trackIndex);
     }
-  };
+  }
 
-  const stopPreview = () => {
+  async function stopPreview() {
     if (previewVideo) {
       previewVideo.srcObject = null;
       previewVideo = null;
@@ -136,11 +139,11 @@ export const Editor: Component<EditorProps> = (props) => {
       track.stop();
     });
     stream = null;
-  };
+  }
 
-  const handleSelectTrack = async (trackIndex: number) => {
+  async function handleSelectTrack(trackIndex: number) {
     // If already selected, deselect
-    if (selectedTrack() === trackIndex) {
+    if (isSelectedTrack(trackIndex)) {
       const prevTrack = selectedTrack();
       if (prevTrack !== null && !project.hasRecording(prevTrack)) {
         compositor?.setVideo(prevTrack, null);
@@ -165,9 +168,9 @@ export const Editor: Component<EditorProps> = (props) => {
       setSelectedTrack(trackIndex);
       await startPreview(trackIndex);
     }
-  };
+  }
 
-  const handleRecord = async () => {
+  async function handleRecord() {
     const track = selectedTrack();
     if (track === null) return;
 
@@ -199,9 +202,9 @@ export const Editor: Component<EditorProps> = (props) => {
         setIsPlaying(true); // Play existing clips while recording
       });
     }
-  };
+  }
 
-  const handlePlayPause = async () => {
+  async function handlePlayPause() {
     // Stop preview when playing
     if (selectedTrack() !== null && !isRecording()) {
       const track = selectedTrack();
@@ -215,31 +218,31 @@ export const Editor: Component<EditorProps> = (props) => {
     await resumeAudioContext();
     setCurrentTime(undefined);
     setIsPlaying(!isPlaying());
-  };
+  }
 
-  const handleStop = () => {
+  function handleStop() {
     setIsPlaying(false);
     setCurrentTime(0);
-  };
+  }
 
-  const handleVideoChange = (index: number, video: HTMLVideoElement | null) => {
+  function handleVideoChange(index: number, video: HTMLVideoElement | null) {
     // Don't override preview video for selected track
     if (selectedTrack() === index && previewVideo) return;
     compositor?.setVideo(index, video);
-  };
+  }
 
-  const handleClearRecording = (index: number) => {
+  function handleClearRecording(index: number) {
     project.clearTrack(index);
     compositor?.setVideo(index, null);
-  };
+  }
 
-  const handleMasterVolumeChange = (e: Event) => {
+  function handleMasterVolumeChange(e: Event) {
     const value = parseFloat((e.target as HTMLInputElement).value);
     setMasterVolume(value);
     getMasterMixer().setMasterVolume(value);
-  };
+  }
 
-  const handlePublish = async () => {
+  async function handlePublish() {
     const currentAgent = agent();
     if (!currentAgent) {
       alert("Please sign in to publish");
@@ -275,14 +278,14 @@ export const Editor: Component<EditorProps> = (props) => {
     } finally {
       setIsPublishing(false);
     }
-  };
+  }
 
-  const hasAnyRecording = () => {
+  function hasAnyRecording() {
     for (let i = 0; i < 4; i++) {
       if (project.hasRecording(i)) return true;
     }
     return false;
-  };
+  }
 
   return (
     <div class={styles.container}>
@@ -292,6 +295,7 @@ export const Editor: Component<EditorProps> = (props) => {
       <div class={styles.compositorContainer} ref={compositorContainer} />
       <div class={styles.transport}>
         <button
+          type="button"
           class={styles.playButton}
           onClick={handlePlayPause}
           disabled={isRecording() || selectedTrack() !== null}
@@ -299,6 +303,7 @@ export const Editor: Component<EditorProps> = (props) => {
           {isPlaying() ? <FiPause size={24} /> : <FiPlay size={24} />}
         </button>
         <button
+          type="button"
           class={styles.recordButton}
           classList={{ [styles.recording]: isRecording() }}
           onClick={handleRecord}
@@ -311,6 +316,7 @@ export const Editor: Component<EditorProps> = (props) => {
           {isRecording() ? <FiSquare size={20} /> : <FiCircle size={20} />}
         </button>
         <button
+          type="button"
           class={styles.stopButton}
           onClick={handleStop}
           disabled={isRecording() || selectedTrack() !== null}
@@ -329,6 +335,7 @@ export const Editor: Component<EditorProps> = (props) => {
           />
         </label>
         <button
+          type="button"
           class={styles.publishButton}
           onClick={handlePublish}
           disabled={

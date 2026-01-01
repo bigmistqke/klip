@@ -1,25 +1,25 @@
-import { type Component, createResource, For, Show } from 'solid-js'
-import { A } from '@solidjs/router'
-import { useAuth } from '~/lib/atproto/AuthContext'
-import { listProjects, type ProjectListItem } from '~/lib/atproto/records'
-import styles from './index.module.css'
+import { A } from "@solidjs/router";
+import { createResource, For, Show } from "solid-js";
+import { useAuth } from "~/lib/atproto/AuthContext";
+import { listProjects } from "~/lib/atproto/records";
+import styles from "./home.module.css";
 
-const Home: Component = () => {
-  const { agent } = useAuth()
+export default function Home() {
+  const { agent } = useAuth();
 
   const [projects] = createResource(
     () => agent(),
     async (currentAgent) => {
-      if (!currentAgent) return []
-      return listProjects(currentAgent)
-    }
-  )
+      if (!currentAgent) return [];
+      return listProjects(currentAgent);
+    },
+  );
 
   const formatDate = (dateStr: string) => {
-    if (!dateStr) return ''
-    const date = new Date(dateStr)
-    return date.toLocaleDateString()
-  }
+    if (!dateStr) return "";
+    const date = new Date(dateStr);
+    return date.toLocaleDateString();
+  };
 
   return (
     <div class={styles.container}>
@@ -39,13 +39,12 @@ const Home: Component = () => {
           <div class={styles.projectGrid}>
             <For each={projects()}>
               {(project) => (
-                <A
-                  href={`/editor/${project.rkey}`}
-                  class={styles.projectCard}
-                >
+                <A href={`/editor/${project.rkey}`} class={styles.projectCard}>
                   <div class={styles.projectTitle}>{project.title}</div>
                   <div class={styles.projectMeta}>
-                    {project.trackCount} track{project.trackCount !== 1 ? 's' : ''} · {formatDate(project.createdAt)}
+                    {project.trackCount} track
+                    {project.trackCount !== 1 ? "s" : ""} ·{" "}
+                    {formatDate(project.createdAt)}
                   </div>
                 </A>
               )}
@@ -54,7 +53,5 @@ const Home: Component = () => {
         </div>
       </Show>
     </div>
-  )
+  );
 }
-
-export default Home

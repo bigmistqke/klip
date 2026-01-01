@@ -1,4 +1,4 @@
-import { Agent } from '@atproto/api'
+import type { Agent } from '@atproto/api'
 import type { Project, StemRef } from '../project/types'
 
 export interface RecordRef {
