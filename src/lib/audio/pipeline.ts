@@ -1,4 +1,5 @@
 import { getAudioContext } from './context'
+import { getMasterMixer } from './mixer'
 
 export interface AudioPipeline {
   gain: GainNode
@@ -14,13 +15,14 @@ const connectedElements = new WeakMap<HTMLMediaElement, MediaElementAudioSourceN
 
 export function createAudioPipeline(): AudioPipeline {
   const ctx = getAudioContext()
+  const mixer = getMasterMixer()
 
   const gain = ctx.createGain()
   const pan = ctx.createStereoPanner()
 
-  // Chain: source -> gain -> pan -> destination
+  // Chain: source -> gain -> pan -> master bus -> destination
   gain.connect(pan)
-  pan.connect(ctx.destination)
+  pan.connect(mixer.getInputNode())
 
   let currentSource: MediaElementAudioSourceNode | null = null
 
