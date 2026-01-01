@@ -9,10 +9,12 @@ import {
 } from "solid-icons/fi";
 import {
   type Component,
+  createEffect,
   createSignal,
   For,
   onCleanup,
   onMount,
+  Show,
 } from "solid-js";
 import { resumeAudioContext } from "~/lib/audio/context";
 import { getMasterMixer } from "~/lib/audio/mixer";
@@ -41,7 +43,7 @@ const stopRecordingAction = action(
   },
 );
 
-export const Editor: Component<EditorProps> = () => {
+export const Editor: Component<EditorProps> = (props) => {
   const { agent } = useAuth();
   const project = useProject();
 
@@ -53,6 +55,15 @@ export const Editor: Component<EditorProps> = () => {
     undefined,
   );
   const [masterVolume, setMasterVolume] = createSignal(1);
+
+  // Load project from URI if provided
+  createEffect(() => {
+    const currentAgent = agent();
+    const projectId = props.projectId;
+    if (currentAgent && projectId) {
+      project.loadFromUri(currentAgent, decodeURIComponent(projectId));
+    }
+  });
 
   const startPreview$ = useAction(startPreviewAction);
   const stopRecording$ = useAction(stopRecordingAction);
@@ -275,6 +286,9 @@ export const Editor: Component<EditorProps> = () => {
 
   return (
     <div class={styles.container}>
+      <Show when={project.isLoading()}>
+        <div class={styles.loadingOverlay}>Loading project...</div>
+      </Show>
       <div class={styles.compositorContainer} ref={compositorContainer} />
       <div class={styles.transport}>
         <button

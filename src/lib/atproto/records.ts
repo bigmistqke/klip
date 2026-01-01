@@ -14,6 +14,90 @@ export interface ProjectListItem {
   trackCount: number
 }
 
+// Parse AT URI into components: at://did/collection/rkey
+function parseAtUri(uri: string): { repo: string; collection: string; rkey: string } {
+  const match = uri.match(/^at:\/\/([^/]+)\/([^/]+)\/([^/]+)$/)
+  if (!match) throw new Error(`Invalid AT URI: ${uri}`)
+  return { repo: match[1], collection: match[2], rkey: match[3] }
+}
+
+export interface ProjectRecord {
+  uri: string
+  cid: string
+  value: {
+    schemaVersion?: number
+    title: string
+    canvas: { width: number; height: number }
+    groups: Array<{
+      type: string
+      id: string
+      columns?: number
+      rows?: number
+      members: Array<{ id: string }>
+    }>
+    tracks: Array<{
+      id: string
+      stem?: { uri: string; cid: string }
+      clips: Array<{ id: string; offset: number; duration: number }>
+      audioPipeline?: Array<{
+        type: string
+        value: { value: number }
+      }>
+    }>
+    createdAt: string
+  }
+}
+
+export async function getProject(agent: Agent, uri: string): Promise<ProjectRecord> {
+  const { repo, collection, rkey } = parseAtUri(uri)
+  const response = await agent.com.atproto.repo.getRecord({
+    repo,
+    collection,
+    rkey,
+  })
+  return {
+    uri: response.data.uri,
+    cid: response.data.cid ?? '',
+    value: response.data.value as ProjectRecord['value'],
+  }
+}
+
+interface StemRecord {
+  blob: {
+    $type: 'blob'
+    ref: { $link: string }
+    mimeType: string
+    size: number
+  }
+  mimeType: string
+  duration: number
+}
+
+export async function getStemBlob(agent: Agent, stemUri: string): Promise<Blob> {
+  // First fetch the stem record to get the blob ref
+  const { repo, collection, rkey } = parseAtUri(stemUri)
+  const stemResponse = await agent.com.atproto.repo.getRecord({
+    repo,
+    collection,
+    rkey,
+  })
+
+  const stemValue = stemResponse.data.value as StemRecord
+  // blob.ref is a CID object, need to convert to string
+  const blobRef = stemValue.blob?.ref as unknown as { toString(): string }
+  const blobCid = blobRef?.toString()
+
+  console.log('Fetching blob:', { did: repo, cid: blobCid })
+
+  // Fetch the actual blob
+  const blobResponse = await agent.com.atproto.sync.getBlob({
+    did: repo,
+    cid: blobCid,
+  })
+
+  return new Blob([blobResponse.data as BlobPart], { type: stemValue.mimeType })
+}
+
 export async function listProjects(agent: Agent): Promise<ProjectListItem[]> {
   const response = await agent.com.atproto.repo.listRecords({
     repo: agent.assertDid,

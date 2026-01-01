@@ -1,17 +1,22 @@
 import { createStore, produce } from 'solid-js/store'
+import type { Agent } from '@atproto/api'
 import type {
   Project,
   Track,
   Clip,
   AudioEffect,
   LocalTrackState,
+  GridGroup,
 } from './types'
+import { getProject, getStemBlob, type ProjectRecord } from '../atproto/records'
 
 export interface ProjectStore {
   project: Project
   local: {
     tracks: Record<string, LocalTrackState>
   }
+  loading: boolean
+  remoteUri: string | null
 }
 
 function createDefaultProject(): Project {
@@ -84,6 +89,8 @@ export function createProjectStore() {
     local: {
       tracks: {},
     },
+    loading: false,
+    remoteUri: null,
   })
 
   const actions = {
@@ -201,9 +208,70 @@ export function createProjectStore() {
     getProjectForPublish(): Project {
       return { ...store.project }
     },
+
+    // Load a project from AT Protocol URI
+    async loadFromUri(agent: Agent, uri: string) {
+      setStore('loading', true)
+      try {
+        const record = await getProject(agent, uri)
+
+        // Convert record to Project format
+        const project: Project = {
+          schemaVersion: record.value.schemaVersion ?? 1,
+          title: record.value.title,
+          canvas: record.value.canvas,
+          groups: record.value.groups.map((g) => ({
+            type: g.type as 'grid',
+            id: g.id,
+            columns: g.columns ?? 2,
+            rows: g.rows ?? 2,
+            members: g.members,
+          })) as GridGroup[],
+          tracks: record.value.tracks.map((t) => ({
+            id: t.id,
+            clips: t.clips,
+            stem: t.stem,
+            audioPipeline: t.audioPipeline?.map((e) => ({
+              type: e.type as 'audio.gain' | 'audio.pan',
+              value: { value: e.value.value / 100 }, // Convert from scaled integer
+            })) ?? [
+              { type: 'audio.gain' as const, value: { value: 1 } },
+              { type: 'audio.pan' as const, value: { value: 0.5 } },
+            ],
+          })),
+          createdAt: record.value.createdAt,
+        }
+
+        setStore('project', project)
+        setStore('remoteUri', uri)
+
+        // Fetch stem blobs for each track
+        for (const track of record.value.tracks) {
+          if (track.stem) {
+            try {
+              const blob = await getStemBlob(agent, track.stem.uri)
+              const clip = track.clips[0]
+              setStore('local', 'tracks', track.id, {
+                localBlob: blob,
+                localDuration: clip?.duration,
+              })
+            } catch (err) {
+              console.error(`Failed to fetch stem for ${track.id}:`, err)
+            }
+          }
+        }
+      } finally {
+        setStore('loading', false)
+      }
+    },
+
+    isLoading(): boolean {
+      return store.loading
+    },
   }
 
   return { store, ...actions }
 }
+
 
 export type ProjectStoreActions = ReturnType<typeof createProjectStore>
