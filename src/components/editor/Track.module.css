@@ -27,10 +27,45 @@
   transform: scaleX(-1);
 }
 
+.sliders {
+  display: flex;
+  gap: 16px;
+}
+
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  color: #888;
+  font-size: 12px;
+}
+
+.slider input {
+  flex: 1;
+  accent-color: #3b82f6;
+}
+
 .controls {
   display: flex;
   justify-content: center;
   gap: 12px;
+}
+
+.playButton {
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 500;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 24px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.playButton:hover {
+  background: #2563eb;
 }
 
 .recordButton {
