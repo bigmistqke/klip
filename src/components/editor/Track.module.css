@@ -1,0 +1,40 @@
+.track {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  background: #1a1a1a;
+  border-radius: 8px;
+}
+
+.preview {
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 14px;
+}
+
+.controls {
+  display: flex;
+  justify-content: center;
+}
+
+.recordButton {
+  padding: 12px 32px;
+  font-size: 16px;
+  font-weight: 500;
+  background: #e53935;
+  color: white;
+  border: none;
+  border-radius: 24px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.recordButton:hover {
+  background: #c62828;
+}
