@@ -70,3 +70,11 @@ Each group type has a matching member type (`member.absolute`, `member.grid`, `m
 - Layout: grid preset only
 - Audio effects: gain + pan only
 - No video effects, transitions, MIDI, or automation
+
+## CSS Guidelines
+
+- **Use CSS Grid for all layouts** - Prefer `display: grid` over flexbox for layout purposes
+
+## Workflow
+
+- **Before committing** - Write a list of things for the user to test and wait for confirmation before creating the commit

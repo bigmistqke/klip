@@ -1,9 +1,10 @@
 .container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  min-height: 100%;
   padding: 2rem;
+  gap: 3rem;
 }
 
 .hero {
@@ -40,4 +41,47 @@
 
 .newProject:hover {
   background: #2563eb;
+}
+
+.projectList {
+  width: 100%;
+  max-width: 600px;
+}
+
+.projectListTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: #ccc;
+}
+
+.projectGrid {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.projectCard {
+  display: block;
+  padding: 1rem;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.projectCard:hover {
+  border-color: #3b82f6;
+  background: #222;
+}
+
+.projectTitle {
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.projectMeta {
+  font-size: 0.875rem;
+  color: #888;
 }

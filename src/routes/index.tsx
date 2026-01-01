@@ -1,8 +1,26 @@
-import { type Component } from 'solid-js'
+import { type Component, createResource, For, Show } from 'solid-js'
 import { A } from '@solidjs/router'
+import { useAuth } from '~/lib/atproto/AuthContext'
+import { listProjects, type ProjectListItem } from '~/lib/atproto/records'
 import styles from './index.module.css'
 
 const Home: Component = () => {
+  const { agent } = useAuth()
+
+  const [projects] = createResource(
+    () => agent(),
+    async (currentAgent) => {
+      if (!currentAgent) return []
+      return listProjects(currentAgent)
+    }
+  )
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return ''
+    const date = new Date(dateStr)
+    return date.toLocaleDateString()
+  }
+
   return (
     <div class={styles.container}>
       <div class={styles.hero}>
@@ -14,6 +32,27 @@ const Home: Component = () => {
           New Project
         </A>
       </div>
+
+      <Show when={agent() && projects()?.length}>
+        <div class={styles.projectList}>
+          <h2 class={styles.projectListTitle}>Your Projects</h2>
+          <div class={styles.projectGrid}>
+            <For each={projects()}>
+              {(project) => (
+                <A
+                  href={`/editor/${encodeURIComponent(project.uri)}`}
+                  class={styles.projectCard}
+                >
+                  <div class={styles.projectTitle}>{project.title}</div>
+                  <div class={styles.projectMeta}>
+                    {project.trackCount} track{project.trackCount !== 1 ? 's' : ''} · {formatDate(project.createdAt)}
+                  </div>
+                </A>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
     </div>
   )
 }

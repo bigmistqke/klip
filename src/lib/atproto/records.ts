@@ -6,6 +6,37 @@ export interface RecordRef {
   cid: string
 }
 
+export interface ProjectListItem {
+  uri: string
+  cid: string
+  title: string
+  createdAt: string
+  trackCount: number
+}
+
+export async function listProjects(agent: Agent): Promise<ProjectListItem[]> {
+  const response = await agent.com.atproto.repo.listRecords({
+    repo: agent.assertDid,
+    collection: 'app.klip.project',
+    limit: 50,
+  })
+
+  return response.data.records.map((record) => {
+    const value = record.value as {
+      title?: string
+      createdAt?: string
+      tracks?: unknown[]
+    }
+    return {
+      uri: record.uri,
+      cid: record.cid,
+      title: value.title ?? 'Untitled',
+      createdAt: value.createdAt ?? '',
+      trackCount: value.tracks?.length ?? 0,
+    }
+  })
+}
+
 export async function uploadBlob(
   agent: Agent,
   blob: Blob
