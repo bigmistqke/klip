@@ -54,11 +54,6 @@
             "ref": "#videoMeta",
             "description": "Video-specific metadata"
           },
-          "waveform": {
-            "type": "ref",
-            "ref": "#waveform",
-            "description": "Pre-computed waveform for display"
-          },
           "thumbnail": {
             "type": "blob",
             "description": "Preview thumbnail for video stems",
@@ -137,32 +132,6 @@
           "type": "boolean",
           "description": "Whether the video contains an audio track",
           "default": true
-        }
-      }
-    },
-
-    "waveform": {
-      "type": "object",
-      "description": "Pre-computed waveform data for visualization",
-      "required": ["peaks", "sampleCount"],
-      "properties": {
-        "peaks": {
-          "type": "bytes",
-          "description": "Normalized peak values (0-255) as binary data",
-          "maxLength": 16384
-        },
-        "sampleCount": {
-          "type": "integer",
-          "description": "Number of peak samples",
-          "minimum": 1,
-          "maximum": 16384
-        },
-        "channels": {
-          "type": "integer",
-          "description": "Number of channels in waveform data",
-          "minimum": 1,
-          "maximum": 2,
-          "default": 1
         }
       }
     }

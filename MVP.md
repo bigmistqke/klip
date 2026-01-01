@@ -147,6 +147,16 @@ The lexicons define a rich, future-proof data model. MVP uses a subset:
 | Video effects | Transform, blur, color, etc. | None |
 | Groups | Nested hierarchy | Single root group |
 
+**Type-Safe Values:**
+
+All runtime parameters use typed value unions that can be static or animated:
+
+| Type | Use Case | Static | Animated |
+|------|----------|--------|----------|
+| `#value` | Numeric (gain, opacity, position) | `{ "value": 0.8 }` | `{ "curve": "fade", "min": 0, "max": 1 }` |
+| `#booleanValue` | Toggles (enabled, muted, solo) | `{ "value": true }` | `{ "curve": "toggle", "threshold": 0.5 }` |
+| `#integerValue` | Discrete (zIndex) | `{ "value": 2 }` | `{ "curve": "layers", "min": 0, "max": 5 }` |
+
 **Effect-Based Architecture:**
 
 Everything is an effect. The schema stores layout algorithms, not just computed positions:
@@ -162,7 +172,7 @@ Everything is an effect. The schema stores layout algorithms, not just computed 
       { "id": "t4" }
     ],
     "pipeline": [
-      { "type": "group.layout.grid", "columns": 2, "rows": 2, "autoPlace": true }
+      { "type": "group.layout.grid", "columns": 2, "rows": 2 }
     ]
   }],
   "tracks": [{
@@ -170,8 +180,8 @@ Everything is an effect. The schema stores layout algorithms, not just computed 
     "stem": { "uri": "at://...", "cid": "..." },
     "clips": [{ "id": "c1", "offset": 0, "duration": 60000 }],
     "audioPipeline": [
-      { "type": "audio.gain", "value": 1.0 },
-      { "type": "audio.pan", "value": 0 }
+      { "type": "audio.gain", "value": { "value": 1.0 } },
+      { "type": "audio.pan", "value": { "value": 0.5 } }
     ],
     "videoPipeline": []
   }]
@@ -328,13 +338,14 @@ MVP: Simple layout presets (UI)
         │
         ▼
 Stored in schema as effect:
-{ "type": "group.layout.grid", "columns": 2, "rows": 2, "autoPlace": true }
+{ "type": "group.layout.grid", "columns": 2, "rows": 2 }
 
 Future: Full positioning control
-- Drag to reposition → updates member position hints
+- Drag to reposition → updates member x/y as { "value": 0.5 }
 - Pinch to resize → updates member width/height
-- Layer order → updates member zIndex
+- Layer order → updates member zIndex as { "value": 2 }
 - Switch layouts → swaps layout effect type
+- Animate position → { "curve": "slide", "min": 0, "max": 1 }
 ```
 
 This keeps MVP simple (pick a preset) while the schema preserves the layout intent for portability and future features. See `lexicons/README.md` for full effect documentation.

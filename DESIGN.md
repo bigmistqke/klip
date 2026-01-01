@@ -66,23 +66,34 @@ The project structure follows an effect-based architecture where all processing 
 ```
 project
 ├── canvas                    # Output dimensions
+├── curves[]                  # Reusable animation curves (keyframe, envelope, lfo)
 ├── groups[]                  # Layout containers
 │   ├── members[]             # Track/group references + position hints
-│   └── pipeline[]            # Effects: layout, visual, mask
+│   └── pipeline[]            # Effects: layout, visual
 ├── tracks[]                  # Media tracks
 │   ├── stem                  # Reference to app.klip.stem record
 │   ├── clips[]               # Timeline regions
-│   ├── audioPipeline[]       # Audio effects chain
-│   └── videoPipeline[]       # Visual effects chain
+│   │   ├── audioPipeline[]   # Clip-level audio effects
+│   │   └── videoPipeline[]   # Clip-level video effects
+│   ├── audioPipeline[]       # Track-level audio effects
+│   └── videoPipeline[]       # Track-level video effects
 ├── masterAudioPipeline[]     # Master audio bus
 └── masterVideoPipeline[]     # Master video output
 ```
 
-**Effect Categories:**
-- `audio.*` - Gain, pan, EQ, compressor, reverb, delay, filter
-- `visual.*` - Transform, opacity, crop, color correction, blur, sharpen
-- `group.layout.*` - Grid, stack, absolute positioning
-- `group.mask` - Shape or track-based masking
+**Effect Categories (MVP):**
+- `audio.*` - Gain, pan (+ custom for third-party)
+- `visual.*` - Transform, opacity (+ custom for third-party)
+- `group.layout.*` - Grid, absolute (+ custom for third-party)
+
+**Value Types:**
+
+All animatable parameters use typed value unions:
+- `#value` - Numeric (gain, opacity, position, etc.)
+- `#booleanValue` - Toggles (enabled, muted, solo, reverse)
+- `#integerValue` - Discrete (zIndex)
+
+Each can be static (`{ "value": 0.8 }`) or animated via curve reference (`{ "curve": "fade", "min": 0, "max": 1 }`).
 
 ### Data Flow
 
