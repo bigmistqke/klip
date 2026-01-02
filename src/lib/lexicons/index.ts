@@ -1,4 +1,4 @@
-import { type AtprotoRefs, atprotoRefs, lexiconToValibot } from "lexicon-to-valibot";
+import { type AtprotoRefs, atprotoRefs, lexiconToValibot } from "@bigmistqke/lexicon-to-valibot";
 import * as v from "valibot";
 import type { Mutable } from "~/utils";
 import projectLexicon from "../../../lexicons/app.klip.project";

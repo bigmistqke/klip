@@ -17,6 +17,9 @@ importers:
       '@atproto/oauth-client-browser':
         specifier: ^0.3.0
         version: 0.3.38
+      '@bigmistqke/lexicon-to-valibot':
+        specifier: ^0.1.0
+        version: 0.1.0(valibot@1.2.0(typescript@5.9.3))
       '@bigmistqke/view.gl':
         specifier: ^0.1.9
         version: 0.1.9
@@ -45,9 +48,6 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.3
-      lexicon-to-valibot:
-        specifier: link:../lexicon-to-valibot
-        version: link:../lexicon-to-valibot
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -212,6 +212,11 @@ packages:
   '@babel/types@7.28.5':
     resolution: {integrity: sha512-qQ5m48eI/MFLQ5PxQj4PFaprjyCTLI37ElWMmNs0K8Lk3dVeOdNpB3ks8jc7yM5CDmVC73eMVk/trk3fgmrUpA==}
     engines: {node: '>=6.9.0'}
+
+  '@bigmistqke/lexicon-to-valibot@0.1.0':
+    resolution: {integrity: sha512-LYkFre/I4xYiEAOrM1FiD1gmpkNJLpJ4Qd3oUNRWgPAjJr6LthqjuSCxBJh5d0WLbo2WzxVjEO9W8nT622n1ng==}
+    peerDependencies:
+      valibot: '>=1.0.0'
 
   '@bigmistqke/view.gl@0.1.9':
     resolution: {integrity: sha512-Xxi6EHwNRwLSmKEtTCDAjlmA9Q9MxVznXfZ73mIcXD/1zTVuV4z8ycVYCNW2w+1TDqXtUYuvv2H1+crf+VV9GA==}
@@ -1075,6 +1080,10 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@bigmistqke/lexicon-to-valibot@0.1.0(valibot@1.2.0(typescript@5.9.3))':
+    dependencies:
+      valibot: 1.2.0(typescript@5.9.3)
 
   '@bigmistqke/view.gl@0.1.9': {}
 
