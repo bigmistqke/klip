@@ -1,9 +1,22 @@
 import type { Agent } from '@atproto/api'
-import type { Project, StemRef } from '../lexicons'
+import type { Wired } from '~/utils'
+import { parseProject, parseStem, type Project, type Stem, type StemRef } from '../lexicons'
 
 export interface RecordRef {
   uri: string
   cid: string
+}
+
+export interface ProjectRecord {
+  uri: string
+  cid: string
+  value: Project
+}
+
+export interface StemRecord {
+  uri: string
+  cid: string
+  value: Stem
 }
 
 export interface ProjectListItem {
@@ -22,37 +35,6 @@ function parseAtUri(uri: string): { repo: string; collection: string; rkey: stri
   return { repo: match[1], collection: match[2], rkey: match[3] }
 }
 
-export interface ProjectRecord {
-  uri: string
-  cid: string
-  value: {
-    schemaVersion?: number
-    title: string
-    canvas: { width: number; height: number }
-    groups: Array<{
-      type: string
-      id: string
-      columns?: number
-      rows?: number
-      members: Array<{ id: string }>
-    }>
-    tracks: Array<{
-      id: string
-      clips: Array<{
-        id: string
-        stem?: { uri: string; cid: string }
-        offset: number
-        duration: number
-      }>
-      audioPipeline?: Array<{
-        type: string
-        value: { value: number }
-      }>
-    }>
-    createdAt: string
-  }
-}
-
 export async function getProject(agent: Agent, uri: string): Promise<ProjectRecord> {
   const { repo, collection, rkey } = parseAtUri(uri)
   const response = await agent.com.atproto.repo.getRecord({
@@ -63,7 +45,7 @@ export async function getProject(agent: Agent, uri: string): Promise<ProjectReco
   return {
     uri: response.data.uri,
     cid: response.data.cid ?? '',
-    value: response.data.value as ProjectRecord['value'],
+    value: parseProject(response.data.value),
   }
 }
 
@@ -91,30 +73,35 @@ export async function getProjectByRkey(
   return getProject(agent, uri)
 }
 
-interface StemRecord {
-  blob: {
-    $type: 'blob'
-    ref: { $link: string }
-    mimeType: string
-    size: number
-  }
-  mimeType: string
-  duration: number
-}
-
-export async function getStemBlob(agent: Agent, stemUri: string): Promise<Blob> {
-  // First fetch the stem record to get the blob ref
-  const { repo, collection, rkey } = parseAtUri(stemUri)
-  const stemResponse = await agent.com.atproto.repo.getRecord({
+async function getStem(agent: Agent, uri: string): Promise<StemRecord> {
+  const { repo, collection, rkey } = parseAtUri(uri)
+  const response = await agent.com.atproto.repo.getRecord({
     repo,
     collection,
     rkey,
   })
+  return {
+    uri: response.data.uri,
+    cid: response.data.cid ?? '',
+    value: parseStem(response.data.value),
+  }
+}
 
-  const stemValue = stemResponse.data.value as StemRecord
-  // blob.ref is a CID object, need to convert to string
-  const blobRef = stemValue.blob?.ref as unknown as { toString(): string }
-  const blobCid = blobRef?.toString()
+export async function getStemBlob(agent: Agent, stemUri: string): Promise<Blob> {
+  const { repo } = parseAtUri(stemUri)
+  const stem = await getStem(agent, stemUri)
+  const blob = stem.value.blob
+
+  // Handle both typed (ref.$link) and untyped (cid) blob formats
+  let blobCid: string
+  if ('ref' in blob) {
+    // TypedBlobRef: ref is a CID object at runtime
+    const ref = blob.ref as unknown as { toString(): string }
+    blobCid = ref.toString()
+  } else {
+    // UntypedBlobRef: cid is already a string
+    blobCid = blob.cid
+  }
 
   console.log('Fetching blob:', { did: repo, cid: blobCid })
 
@@ -124,7 +111,7 @@ export async function getStemBlob(agent: Agent, stemUri: string): Promise<Blob> 
     cid: blobCid,
   })
 
-  return new Blob([blobResponse.data as BlobPart], { type: stemValue.mimeType })
+  return new Blob([blobResponse.data as BlobPart], { type: stem.value.mimeType })
 }
 
 export async function listProjects(agent: Agent): Promise<ProjectListItem[]> {
@@ -135,19 +122,15 @@ export async function listProjects(agent: Agent): Promise<ProjectListItem[]> {
   })
 
   return response.data.records.map((record) => {
-    const value = record.value as {
-      title?: string
-      createdAt?: string
-      tracks?: unknown[]
-    }
+    const project = parseProject(record.value)
     const { rkey } = parseAtUri(record.uri)
     return {
       uri: record.uri,
       cid: record.cid,
       rkey,
-      title: value.title ?? 'Untitled',
-      createdAt: value.createdAt ?? '',
-      trackCount: value.tracks?.length ?? 0,
+      title: project.title,
+      createdAt: project.createdAt,
+      trackCount: project.tracks.length,
     }
   })
 }
@@ -172,7 +155,7 @@ export async function createStemRecord(
   const record = {
     $type: 'app.klip.stem',
     schemaVersion: 1,
-    blob: uploadedBlob,
+    blob: uploadedBlob.toJSON(),
     type: 'video',
     mimeType: blob.type,
     duration: Math.round(duration),
@@ -180,7 +163,7 @@ export async function createStemRecord(
       hasAudio: true,
     },
     createdAt: new Date().toISOString(),
-  }
+  } satisfies Stem & { $type: 'app.klip.stem' }
 
   const response = await agent.com.atproto.repo.createRecord({
     repo: agent.assertDid,
@@ -200,27 +183,17 @@ async function cloneStem(agent: Agent, stemUri: string): Promise<StemRef> {
 
   // Already ours, no need to clone
   if (repo === agent.assertDid) {
-    const response = await agent.com.atproto.repo.getRecord({
-      repo,
-      collection: 'app.klip.stem',
-      rkey: parseAtUri(stemUri).rkey,
-    })
-    return { uri: response.data.uri, cid: response.data.cid ?? '' }
+    const stem = await getStem(agent, stemUri)
+    return { uri: stem.uri, cid: stem.cid }
   }
 
-  // Fetch the blob and create a new stem on our PDS
-  const blob = await getStemBlob(agent, stemUri)
+  // Fetch the blob and get duration from original stem record
+  const [blob, stem] = await Promise.all([
+    getStemBlob(agent, stemUri),
+    getStem(agent, stemUri),
+  ])
 
-  // Get duration from original stem record
-  const { rkey } = parseAtUri(stemUri)
-  const stemResponse = await agent.com.atproto.repo.getRecord({
-    repo,
-    collection: 'app.klip.stem',
-    rkey,
-  })
-  const duration = (stemResponse.data.value as { duration: number }).duration
-
-  return createStemRecord(agent, blob, duration)
+  return createStemRecord(agent, blob, stem.value.duration)
 }
 
 export async function publishProject(
@@ -279,7 +252,7 @@ export async function publishProject(
     .filter((track) => track.clips.length > 0)
 
   // Build project record
-  const record = {
+  const record: Wired<Project, 'app.klip.project'> = {
     $type: 'app.klip.project',
     schemaVersion: 1,
     title: project.title,

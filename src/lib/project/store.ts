@@ -213,18 +213,18 @@ export function createProjectStore() {
       setStore('loading', true)
       try {
         const record = await getProjectByRkey(agent, rkey, handle)
-        setStore('project', record.value as unknown as Project)
+        setStore('project', record.value)
         setStore('remoteUri', record.uri)
 
         // Fetch stem blobs in parallel
         const clipsWithStems = record.value.tracks
           .flatMap((track) => track.clips)
-          .filter((clip) => clip.stem)
+          .filter((clip): clip is typeof clip & { stem: NonNullable<typeof clip.stem> } => !!clip.stem)
 
         await Promise.all(
           clipsWithStems.map(async (clip) => {
             try {
-              const blob = await getStemBlob(agent, clip.stem!.uri)
+              const blob = await getStemBlob(agent, clip.stem.uri)
               setStore('local', 'clips', clip.id, {
                 blob,
                 duration: clip.duration,

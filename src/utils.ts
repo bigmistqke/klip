@@ -4,3 +4,6 @@ export type Mutable<T> = T extends object
     ? Mutable<U>[]
     : { -readonly [K in keyof T]: Mutable<T[K]> }
     : T;
+
+// AT Protocol wire format: adds $type to a schema type
+export type Wired<T, Type extends string> = { $type: Type } & T;
