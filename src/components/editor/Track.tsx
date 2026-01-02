@@ -110,7 +110,8 @@ export const Track: Component<TrackProps> = (props) => {
 
   // React to global play/pause/stop and seek
   createEffect(() => {
-    if (!hasRecording() || !playerHook.isReady()) return;
+    // Need player to be loaded, but allow any state (including 'playing')
+    if (!hasRecording() || !playerHook.player()) return;
 
     const isPlaying = props.isPlaying;
     const currentTime = props.currentTime;
