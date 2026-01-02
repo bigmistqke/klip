@@ -1,4 +1,6 @@
-{
+import type { LexiconDoc } from "@atproto/lexicon";
+
+export default {
   "lexicon": 1,
   "id": "app.klip.project",
   "defs": {
@@ -40,13 +42,13 @@
           },
           "curves": {
             "type": "array",
-            "items": { "type": "ref", "ref": "#curve" },
+            "items": { "type": "union", "refs": ["#curve.keyframe", "#curve.envelope", "#curve.lfo"] },
             "maxLength": 256,
             "description": "Reusable animation curves. Each curve has a unique id field; validators must reject duplicates. Runtime may convert to map for O(1) lookup."
           },
           "groups": {
             "type": "array",
-            "items": { "type": "ref", "ref": "#group" },
+            "items": { "type": "union", "refs": ["#group.grid", "#group.absolute"] },
             "maxLength": 64,
             "description": "Groups containing tracks with layout effects"
           },
@@ -57,13 +59,13 @@
           },
           "masterAudioPipeline": {
             "type": "array",
-            "items": { "type": "ref", "ref": "#audioEffect" },
+            "items": { "type": "union", "refs": ["#audioEffect.pan", "#audioEffect.gain", "#audioEffect.custom"] },
             "maxLength": 16,
             "description": "Master audio bus effects"
           },
           "masterVideoPipeline": {
             "type": "array",
-            "items": { "type": "ref", "ref": "#visualEffect" },
+            "items": { "type": "union", "refs": ["#visualEffect.transform", "#visualEffect.opacity", "#visualEffect.custom"] },
             "maxLength": 16,
             "description": "Master video output effects"
           },
@@ -105,16 +107,6 @@
           "maxLength": 32
         }
       }
-    },
-
-    "curve": {
-      "type": "union",
-      "description": "Animation curve definition",
-      "refs": [
-        "#curve.keyframe",
-        "#curve.envelope",
-        "#curve.lfo"
-      ]
     },
 
     "curve.keyframe": {
@@ -277,12 +269,6 @@
       }
     },
 
-    "value": {
-      "type": "union",
-      "description": "A numeric value that can be static or animated",
-      "refs": ["#staticValue", "#curveRef"]
-    },
-
     "staticValue": {
       "type": "object",
       "description": "A static numeric value. Values are integers scaled by 100 (e.g., 50 = 0.5, 100 = 1.0). This avoids floats which AT Protocol doesn't support.",
@@ -348,133 +334,6 @@
       }
     },
 
-    "booleanValue": {
-      "type": "union",
-      "description": "A boolean value that can be static or animated",
-      "refs": ["#staticBooleanValue", "#booleanCurveRef"]
-    },
-
-    "staticBooleanValue": {
-      "type": "object",
-      "description": "A static boolean value",
-      "required": ["value"],
-      "properties": {
-        "value": {
-          "type": "boolean"
-        }
-      }
-    },
-
-    "booleanCurveRef": {
-      "type": "object",
-      "description": "Reference to a curve interpreted as boolean",
-      "required": ["curve"],
-      "properties": {
-        "curve": {
-          "type": "string",
-          "description": "ID of the curve to reference. Must match an id in project.curves array.",
-          "maxLength": 64
-        },
-        "threshold": {
-          "type": "integer",
-          "description": "Value at which curve becomes true",
-          "default": 0.5
-        },
-        "offset": {
-          "type": "integer",
-          "description": "Time offset in milliseconds",
-          "default": 0
-        },
-        "timeScale": {
-          "type": "integer",
-          "description": "Time multiplier (2 = twice as fast)",
-          "default": 1
-        },
-        "timeRef": {
-          "type": "string",
-          "enum": ["clip", "project"],
-          "description": "Time reference: clip-relative or project-relative",
-          "default": "clip"
-        }
-      }
-    },
-
-    "integerValue": {
-      "type": "union",
-      "description": "An integer value that can be static or animated",
-      "refs": ["#staticIntegerValue", "#integerCurveRef"]
-    },
-
-    "staticIntegerValue": {
-      "type": "object",
-      "description": "A static integer value",
-      "required": ["value"],
-      "properties": {
-        "value": {
-          "type": "integer"
-        },
-        "min": {
-          "type": "integer",
-          "description": "Minimum allowed value"
-        },
-        "max": {
-          "type": "integer",
-          "description": "Maximum allowed value"
-        }
-      }
-    },
-
-    "integerCurveRef": {
-      "type": "object",
-      "description": "Reference to a curve with integer output",
-      "required": ["curve"],
-      "properties": {
-        "curve": {
-          "type": "string",
-          "description": "ID of the curve to reference. Must match an id in project.curves array.",
-          "maxLength": 64
-        },
-        "min": {
-          "type": "integer",
-          "description": "Minimum output value (curve 0 maps to this)",
-          "default": 0
-        },
-        "max": {
-          "type": "integer",
-          "description": "Maximum output value (curve 1 maps to this)",
-          "default": 1
-        },
-        "round": {
-          "type": "string",
-          "description": "Rounding method for interpolated values",
-          "enum": ["floor", "round", "ceil"],
-          "default": "round"
-        },
-        "offset": {
-          "type": "integer",
-          "description": "Time offset in milliseconds",
-          "default": 0
-        },
-        "timeScale": {
-          "type": "integer",
-          "description": "Time multiplier (2 = twice as fast)",
-          "default": 1
-        },
-        "timeRef": {
-          "type": "string",
-          "enum": ["clip", "project"],
-          "description": "Time reference: clip-relative or project-relative",
-          "default": "clip"
-        }
-      }
-    },
-
-    "group": {
-      "type": "union",
-      "description": "A group of tracks/groups. Type determines layout strategy.",
-      "refs": ["#group.absolute", "#group.grid", "#group.custom"]
-    },
-
     "group.absolute": {
       "type": "object",
       "description": "Group with absolute positioning. Members specify x/y/width/height.",
@@ -496,7 +355,7 @@
         },
         "pipeline": {
           "type": "array",
-          "items": { "type": "ref", "ref": "#visualEffect" },
+          "items": { "type": "union", "refs": ["#visualEffect.transform", "#visualEffect.opacity", "#visualEffect.custom"] },
           "maxLength": 16,
           "description": "Visual effects applied to the composited group"
         }
@@ -528,13 +387,13 @@
           "maximum": 16
         },
         "gap": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Gap between cells (0-1 relative to group size)"
         },
         "padding": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Padding around grid (0-1 relative to group size)"
         },
         "autoPlace": {
@@ -549,7 +408,7 @@
         },
         "pipeline": {
           "type": "array",
-          "items": { "type": "ref", "ref": "#visualEffect" },
+          "items": { "type": "union", "refs": ["#visualEffect.transform", "#visualEffect.opacity", "#visualEffect.custom"] },
           "maxLength": 16,
           "description": "Visual effects applied to the composited group"
         }
@@ -574,7 +433,7 @@
           "maxLength": 128
         },
         "params": {
-          "type": "object",
+          "type": "unknown",
           "description": "Layout-specific parameters"
         },
         "members": {
@@ -584,7 +443,7 @@
         },
         "pipeline": {
           "type": "array",
-          "items": { "type": "ref", "ref": "#visualEffect" },
+          "items": { "type": "union", "refs": ["#visualEffect.transform", "#visualEffect.opacity", "#visualEffect.custom"] },
           "maxLength": 16,
           "description": "Visual effects applied to the composited group"
         }
@@ -602,28 +461,28 @@
           "maxLength": 64
         },
         "x": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "X position (0-1 relative to group)"
         },
         "y": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Y position (0-1 relative to group)"
         },
         "width": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Width (0-1 relative to group)"
         },
         "height": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Height (0-1 relative to group)"
         },
         "zIndex": {
-          "type": "ref",
-          "ref": "#integerValue",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Layer order within group"
         },
         "fit": {
@@ -665,18 +524,18 @@
           "default": 1
         },
         "x": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "X offset within cell (0-1 relative to cell)"
         },
         "y": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Y offset within cell (0-1 relative to cell)"
         },
         "zIndex": {
-          "type": "ref",
-          "ref": "#integerValue",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Layer order within group"
         },
         "fit": {
@@ -698,12 +557,12 @@
           "maxLength": 64
         },
         "hints": {
-          "type": "object",
+          "type": "unknown",
           "description": "Layout-specific member hints"
         },
         "zIndex": {
-          "type": "ref",
-          "ref": "#integerValue",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Layer order within group"
         },
         "fit": {
@@ -727,11 +586,6 @@
           "type": "string",
           "maxLength": 128
         },
-        "stem": {
-          "type": "ref",
-          "ref": "com.atproto.repo.strongRef",
-          "description": "Reference to app.klip.stem record"
-        },
         "clips": {
           "type": "array",
           "items": { "type": "ref", "ref": "#clip" },
@@ -739,24 +593,24 @@
         },
         "audioPipeline": {
           "type": "array",
-          "items": { "type": "ref", "ref": "#audioEffect" },
+          "items": { "type": "union", "refs": ["#audioEffect.pan", "#audioEffect.gain", "#audioEffect.custom"] },
           "maxLength": 16,
           "description": "Track-level audio effect chain"
         },
         "videoPipeline": {
           "type": "array",
-          "items": { "type": "ref", "ref": "#visualEffect" },
+          "items": { "type": "union", "refs": ["#visualEffect.transform", "#visualEffect.opacity", "#visualEffect.custom"] },
           "maxLength": 16,
           "description": "Track-level video effect chain"
         },
         "muted": {
-          "type": "ref",
-          "ref": "#booleanValue",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Mute track"
         },
         "solo": {
-          "type": "ref",
-          "ref": "#booleanValue",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Solo track"
         }
       }
@@ -770,6 +624,11 @@
         "id": {
           "type": "string",
           "maxLength": 64
+        },
+        "stem": {
+          "type": "ref",
+          "ref": "com.atproto.repo.strongRef",
+          "description": "Reference to app.klip.stem record"
         },
         "offset": {
           "type": "integer",
@@ -788,38 +647,28 @@
           "minimum": 0
         },
         "speed": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Playback speed multiplier (0.1-10)"
         },
         "reverse": {
-          "type": "ref",
-          "ref": "#booleanValue",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Play clip in reverse"
         },
         "audioPipeline": {
           "type": "array",
-          "items": { "type": "ref", "ref": "#audioEffect" },
+          "items": { "type": "union", "refs": ["#audioEffect.pan", "#audioEffect.gain", "#audioEffect.custom"] },
           "maxLength": 16,
           "description": "Clip-level audio effects (curves are clip-relative)"
         },
         "videoPipeline": {
           "type": "array",
-          "items": { "type": "ref", "ref": "#visualEffect" },
+          "items": { "type": "union", "refs": ["#visualEffect.transform", "#visualEffect.opacity", "#visualEffect.custom"] },
           "maxLength": 16,
           "description": "Clip-level video effects (curves are clip-relative)"
         }
       }
-    },
-
-    "audioEffect": {
-      "type": "union",
-      "description": "Audio processing effect",
-      "refs": [
-        "#audioEffect.gain",
-        "#audioEffect.pan",
-        "#audioEffect.custom"
-      ]
     },
 
     "audioEffect.gain": {
@@ -827,10 +676,10 @@
       "required": ["type", "value"],
       "properties": {
         "type": { "type": "string", "const": "audio.gain" },
-        "enabled": { "type": "ref", "ref": "#booleanValue" },
+        "enabled": { "type": "union", "refs": ["#staticValue", "#curveRef"] },
         "value": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Volume (0-1, where 1 = unity gain)"
         }
       }
@@ -841,10 +690,10 @@
       "required": ["type", "value"],
       "properties": {
         "type": { "type": "string", "const": "audio.pan" },
-        "enabled": { "type": "ref", "ref": "#booleanValue" },
+        "enabled": { "type": "union", "refs": ["#staticValue", "#curveRef"] },
         "value": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Stereo position (0 = left, 0.5 = center, 1 = right)"
         }
       }
@@ -859,22 +708,12 @@
           "type": "string",
           "description": "Custom effect identifier (e.g., 'audio.vendor.effectName')"
         },
-        "enabled": { "type": "ref", "ref": "#booleanValue" },
+        "enabled": { "type": "union", "refs": ["#staticValue", "#curveRef"] },
         "params": {
-          "type": "object",
+          "type": "unknown",
           "description": "Effect-specific parameters"
         }
       }
-    },
-
-    "visualEffect": {
-      "type": "union",
-      "description": "Visual processing effect (usable on clips, tracks, and groups)",
-      "refs": [
-        "#visualEffect.transform",
-        "#visualEffect.opacity",
-        "#visualEffect.custom"
-      ]
     },
 
     "visualEffect.transform": {
@@ -882,35 +721,35 @@
       "required": ["type"],
       "properties": {
         "type": { "type": "string", "const": "visual.transform" },
-        "enabled": { "type": "ref", "ref": "#booleanValue" },
+        "enabled": { "type": "union", "refs": ["#staticValue", "#curveRef"] },
         "x": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "X offset (0-1 relative to canvas)"
         },
         "y": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Y offset (0-1 relative to canvas)"
         },
         "scale": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Uniform scale (0-1, where 1 = 100%)"
         },
         "rotation": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Rotation (0-1, where 1 = 360 degrees)"
         },
         "anchorX": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Transform anchor X (0-1)"
         },
         "anchorY": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Transform anchor Y (0-1)"
         }
       }
@@ -921,10 +760,10 @@
       "required": ["type", "value"],
       "properties": {
         "type": { "type": "string", "const": "visual.opacity" },
-        "enabled": { "type": "ref", "ref": "#booleanValue" },
+        "enabled": { "type": "union", "refs": ["#staticValue", "#curveRef"] },
         "value": {
-          "type": "ref",
-          "ref": "#value",
+          "type": "union",
+          "refs": ["#staticValue", "#curveRef"],
           "description": "Opacity (0-1)"
         },
         "blendMode": {
@@ -944,12 +783,12 @@
           "type": "string",
           "description": "Custom effect identifier (e.g., 'visual.vendor.effectName')"
         },
-        "enabled": { "type": "ref", "ref": "#booleanValue" },
+        "enabled": { "type": "union", "refs": ["#staticValue", "#curveRef"] },
         "params": {
-          "type": "object",
+          "type": "unknown",
           "description": "Effect-specific parameters"
         }
       }
     }
   }
-}
+} as const satisfies LexiconDoc

@@ -11,8 +11,8 @@ import {
   Show,
 } from "solid-js";
 import { type AudioPipeline, createAudioPipeline } from "~/lib/audio/pipeline";
+import type { AudioEffect } from "~/lib/lexicons";
 import { useProject } from "~/lib/project/context";
-import type { AudioEffect } from "~/lib/project/types";
 import styles from "./Track.module.css";
 
 interface TrackProps {
@@ -39,7 +39,9 @@ export const Track: Component<TrackProps> = (props) => {
 
   // Derived state from project store
   const hasRecording = createMemo(() => project.hasRecording(props.id));
-  const track = createMemo(() => project.store.project.tracks.find((t) => t.id === trackId));
+  const track = createMemo(() =>
+    project.store.project.tracks.find((t) => t.id === trackId),
+  );
   const firstClip = createMemo(() => track()?.clips[0]);
   const clipBlob = createMemo(() => {
     const clip = firstClip();
@@ -48,7 +50,8 @@ export const Track: Component<TrackProps> = (props) => {
   const audioPipeline = createMemo(() => project.getTrackPipeline(trackId));
 
   // Helper to get effect value by index
-  const getEffectValue = (index: number) => project.getEffectValue(trackId, index);
+  const getEffectValue = (index: number) =>
+    project.getEffectValue(trackId, index);
 
   onMount(() => {
     pipeline = createAudioPipeline();
@@ -109,7 +112,11 @@ export const Track: Component<TrackProps> = (props) => {
   }
 
   // Generic effect change handler
-  function handleEffectChange(effect: AudioEffect, index: number, value: number) {
+  function handleEffectChange(
+    effect: AudioEffect,
+    index: number,
+    value: number,
+  ) {
     project.setEffectValue(trackId, index, value);
     applyEffectToAudioPipeline(effect.type, value);
   }
@@ -149,7 +156,10 @@ export const Track: Component<TrackProps> = (props) => {
   }
 
   // Convert display value back for storage
-  function parseDisplayValue(effect: AudioEffect, displayValue: number): number {
+  function parseDisplayValue(
+    effect: AudioEffect,
+    displayValue: number,
+  ): number {
     if (effect.type === "audio.pan") {
       return (displayValue + 1) / 2;
     }
@@ -163,6 +173,8 @@ export const Track: Component<TrackProps> = (props) => {
         return { min: 0, max: 1, step: 0.01, label: "Vol" };
       case "audio.pan":
         return { min: -1, max: 1, step: 0.01, label: "Pan" };
+      default:
+        return { min: 0, max: 1, step: 0.01, label: "Custom" };
     }
   }
 
@@ -212,7 +224,9 @@ export const Track: Component<TrackProps> = (props) => {
                   step={config.step}
                   value={getDisplayValue(effect, index())}
                   onInput={(e) => {
-                    const displayValue = parseFloat((e.target as HTMLInputElement).value);
+                    const displayValue = parseFloat(
+                      (e.target as HTMLInputElement).value,
+                    );
                     const storeValue = parseDisplayValue(effect, displayValue);
                     handleEffectChange(effect, index(), storeValue);
                   }}

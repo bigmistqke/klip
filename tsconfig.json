@@ -13,11 +13,12 @@
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "allowArbitraryExtensions": true,
     "verbatimModuleSyntax": true,
     "baseUrl": ".",
     "paths": {
       "~/*": ["src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "lexicons"]
 }

@@ -1,12 +1,15 @@
 import type { Agent } from '@atproto/api'
 import { createStore, produce } from 'solid-js/store'
+import type { AudioEffect, Project, Track } from '~/lib/lexicons'
 import { getProjectByRkey, getStemBlob } from '../atproto/records'
-import type {
-  AudioEffect,
-  LocalClipState,
-  Project,
-  Track,
-} from './types'
+
+// Local state extensions (not persisted to PDS)
+interface LocalClipState {
+  // The actual blob for playback (not serialized)
+  blob?: Blob
+  // Duration in ms
+  duration?: number
+}
 
 export interface ProjectStore {
   project: Project
@@ -107,9 +110,12 @@ export function createProjectStore() {
         (t) => t.id === trackId,
         'audioPipeline',
         effectIndex,
-        'value',
-        'value',
-        Math.round(value * 100)
+        (effect) => {
+          if ('value' in effect && effect.value && 'value' in effect.value) {
+            return { ...effect, value: { ...effect.value, value: Math.round(value * 100) } }
+          }
+          return effect
+        }
       )
     },
 
@@ -117,7 +123,10 @@ export function createProjectStore() {
     getEffectValue(trackId: string, effectIndex: number): number {
       const track = store.project.tracks.find((t) => t.id === trackId)
       const effect = track?.audioPipeline?.[effectIndex]
-      return (effect?.value.value ?? 100) / 100
+      if (effect && 'value' in effect && effect.value && 'value' in effect.value) {
+        return effect.value.value / 100
+      }
+      return 1 // default
     },
 
     // Get track's audio pipeline

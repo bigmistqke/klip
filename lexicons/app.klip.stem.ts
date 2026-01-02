@@ -1,4 +1,6 @@
-{
+import type { LexiconDoc } from "@atproto/lexicon";
+
+export default {
   "lexicon": 1,
   "id": "app.klip.stem",
   "defs": {
@@ -118,10 +120,10 @@
           "maximum": 8192
         },
         "fps": {
-          "type": "number",
-          "description": "Frames per second",
-          "minimum": 1,
-          "maximum": 240
+          "type": "integer",
+          "description": "Frames per second (scaled by 100, e.g., 2997 = 29.97 fps)",
+          "minimum": 100,
+          "maximum": 24000
         },
         "codec": {
           "type": "string",
@@ -136,4 +138,4 @@
       }
     }
   }
-}
+} as const satisfies LexiconDoc

@@ -1,5 +1,5 @@
 import type { Agent } from '@atproto/api'
-import type { Project, StemRef } from '../project/types'
+import type { Project, StemRef } from '../lexicons'
 
 export interface RecordRef {
   uri: string
@@ -287,13 +287,22 @@ export async function publishProject(
       width: project.canvas.width,
       height: project.canvas.height,
     },
-    groups: project.groups.map((group) => ({
-      type: group.type,
-      id: group.id,
-      columns: group.columns,
-      rows: group.rows,
-      members: group.members.map((m) => ({ id: m.id })),
-    })),
+    groups: project.groups.map((group) => {
+      if (group.type === "grid") {
+        return {
+          type: group.type,
+          id: group.id,
+          columns: group.columns,
+          rows: group.rows,
+          members: group.members.map((m) => ({ id: m.id })),
+        }
+      }
+      return {
+        type: group.type,
+        id: group.id,
+        members: group.members.map((m) => ({ id: m.id })),
+      }
+    }),
     tracks,
     createdAt: project.createdAt,
   }
