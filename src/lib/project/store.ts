@@ -1,17 +1,17 @@
-import { createStore, produce } from 'solid-js/store'
 import type { Agent } from '@atproto/api'
+import { createStore, produce } from 'solid-js/store'
+import { getProjectByRkey, getStemBlob } from '../atproto/records'
 import type {
+  AudioEffect,
+  LocalClipState,
   Project,
   Track,
-  AudioEffect,
-  LocalTrackState,
 } from './types'
-import { getProjectByRkey, getStemBlob, type ProjectRecord } from '../atproto/records'
 
 export interface ProjectStore {
   project: Project
   local: {
-    tracks: Record<string, LocalTrackState>
+    clips: Record<string, LocalClipState>
   }
   loading: boolean
   remoteUri: string | null
@@ -86,7 +86,7 @@ export function createProjectStore() {
   const [store, setStore] = createStore<ProjectStore>({
     project: createDefaultProject(),
     local: {
-      tracks: {},
+      clips: {},
     },
     loading: false,
     remoteUri: null,
@@ -130,7 +130,7 @@ export function createProjectStore() {
       const trackId = `track-${trackIndex}`
       const clipId = `clip-${trackIndex}-${Date.now()}`
 
-      // Add clip to track
+      // Add clip to track (stem will be set when publishing)
       setStore(
         'project',
         'tracks',
@@ -146,10 +146,10 @@ export function createProjectStore() {
         })
       )
 
-      // Store local blob reference
-      setStore('local', 'tracks', trackId, {
-        localBlob: blob,
-        localDuration: duration,
+      // Store local blob reference by clipId
+      setStore('local', 'clips', clipId, {
+        blob,
+        duration,
       })
 
       setStore('project', 'updatedAt', new Date().toISOString())
@@ -157,6 +157,14 @@ export function createProjectStore() {
 
     clearTrack(trackIndex: number) {
       const trackId = `track-${trackIndex}`
+      const track = store.project.tracks.find((t) => t.id === trackId)
+
+      // Clear local blobs for all clips on this track
+      if (track) {
+        for (const clip of track.clips) {
+          setStore('local', 'clips', clip.id, undefined!)
+        }
+      }
 
       setStore(
         'project',
@@ -164,21 +172,19 @@ export function createProjectStore() {
         (t) => t.id === trackId,
         produce((track: Track) => {
           track.clips = []
-          track.stem = undefined
         })
       )
 
-      setStore('local', 'tracks', trackId, undefined!)
       setStore('project', 'updatedAt', new Date().toISOString())
     },
 
-    // Get clip blob by track ID (clipId reserved for future multi-clip support)
-    getClipBlob(trackId: string, _clipId?: string): Blob | undefined {
-      return store.local.tracks[trackId]?.localBlob
+    // Get clip blob by clipId
+    getClipBlob(clipId: string): Blob | undefined {
+      return store.local.clips[clipId]?.blob
     },
 
-    getClipDuration(trackId: string, _clipId?: string): number | undefined {
-      return store.local.tracks[trackId]?.localDuration
+    getClipDuration(clipId: string): number | undefined {
+      return store.local.clips[clipId]?.duration
     },
 
     hasRecording(trackIndex: number): boolean {
@@ -189,8 +195,8 @@ export function createProjectStore() {
 
 
     // Get project ready for publishing (without local state)
-    getProjectForPublish(): Project {
-      return { ...store.project }
+    getProject(): Project {
+      return store.project
     },
 
     // Load a project by rkey (and optional handle)
@@ -201,18 +207,19 @@ export function createProjectStore() {
         setStore('project', record.value as unknown as Project)
         setStore('remoteUri', record.uri)
 
-        // Fetch stem blobs for each track
+        // Fetch stem blobs for each clip
         for (const track of record.value.tracks) {
-          if (track.stem) {
-            try {
-              const blob = await getStemBlob(agent, track.stem.uri)
-              const clip = track.clips[0]
-              setStore('local', 'tracks', track.id, {
-                localBlob: blob,
-                localDuration: clip?.duration,
-              })
-            } catch (err) {
-              console.error(`Failed to fetch stem for ${track.id}:`, err)
+          for (const clip of track.clips) {
+            if (clip.stem) {
+              try {
+                const blob = await getStemBlob(agent, clip.stem.uri)
+                setStore('local', 'clips', clip.id, {
+                  blob,
+                  duration: clip.duration,
+                })
+              } catch (err) {
+                console.error(`Failed to fetch stem for clip ${clip.id}:`, err)
+              }
             }
           }
         }

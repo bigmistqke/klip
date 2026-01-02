@@ -1,22 +1,12 @@
-import { createContext, useContext, type ParentComponent } from 'solid-js'
-import { createProjectStore, type ProjectStoreActions } from './store'
+import { createContext, useContext } from 'solid-js'
+import type { ProjectStoreActions } from './store'
 
-const ProjectContext = createContext<ProjectStoreActions>()
-
-export const ProjectProvider: ParentComponent = (props) => {
-  const projectStore = createProjectStore()
-
-  return (
-    <ProjectContext.Provider value={projectStore}>
-      {props.children}
-    </ProjectContext.Provider>
-  )
-}
+export const ProjectContext = createContext<ProjectStoreActions>()
 
 export function useProject(): ProjectStoreActions {
   const context = useContext(ProjectContext)
   if (!context) {
-    throw new Error('useProject must be used within a ProjectProvider')
+    throw new Error('useProject must be used within Editor')
   }
   return context
 }

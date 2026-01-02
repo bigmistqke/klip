@@ -38,8 +38,12 @@ export interface ProjectRecord {
     }>
     tracks: Array<{
       id: string
-      stem?: { uri: string; cid: string }
-      clips: Array<{ id: string; offset: number; duration: number }>
+      clips: Array<{
+        id: string
+        stem?: { uri: string; cid: string }
+        offset: number
+        duration: number
+      }>
       audioPipeline?: Array<{
         type: string
         value: { value: number }
@@ -193,30 +197,32 @@ export async function createStemRecord(
 export async function publishProject(
   agent: Agent,
   project: Project,
-  trackBlobs: Map<string, { blob: Blob; duration: number }>
+  clipBlobs: Map<string, { blob: Blob; duration: number }>
 ): Promise<RecordRef> {
-  // Upload stems for tracks that have local blobs
+  // Upload stems for clips that have local blobs
   const stemRefs = new Map<string, StemRef>()
 
-  for (const [trackId, { blob, duration }] of trackBlobs) {
+  for (const [clipId, { blob, duration }] of clipBlobs) {
     const stemRecord = await createStemRecord(agent, blob, duration)
-    stemRefs.set(trackId, {
+    stemRefs.set(clipId, {
       uri: stemRecord.uri,
       cid: stemRecord.cid,
     })
   }
 
-  // Build tracks - data is already in record format (scaled integers)
+  // Build tracks - stem is now on each clip
   const tracks = project.tracks
-    .filter((track) => stemRefs.has(track.id))
+    .filter((track) => track.clips.some((clip) => stemRefs.has(clip.id)))
     .map((track) => ({
       id: track.id,
-      clips: track.clips.map((clip) => ({
-        id: clip.id,
-        offset: clip.offset,
-        duration: clip.duration,
-      })),
-      stem: stemRefs.get(track.id),
+      clips: track.clips
+        .filter((clip) => stemRefs.has(clip.id))
+        .map((clip) => ({
+          id: clip.id,
+          stem: stemRefs.get(clip.id),
+          offset: clip.offset,
+          duration: clip.duration,
+        })),
       audioPipeline: track.audioPipeline,
     }))
 

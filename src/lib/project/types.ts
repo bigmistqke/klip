@@ -37,8 +37,14 @@ export interface AudioEffectPan {
 
 export type AudioEffect = AudioEffectGain | AudioEffectPan
 
+export interface StemRef {
+  uri: string
+  cid: string
+}
+
 export interface Clip {
   id: string
+  stem?: StemRef
   offset: number
   sourceOffset?: number
   duration: number
@@ -47,15 +53,9 @@ export interface Clip {
   audioPipeline?: AudioEffect[]
 }
 
-export interface StemRef {
-  uri: string
-  cid: string
-}
-
 export interface Track {
   id: string
   name?: string
-  stem?: StemRef
   clips: Clip[]
   audioPipeline?: AudioEffect[]
   muted?: BooleanValue
@@ -132,13 +132,9 @@ export interface Stem {
 }
 
 // Local state extensions (not persisted to PDS)
-export interface LocalTrackState {
+export interface LocalClipState {
   // The actual blob for playback (not serialized)
-  localBlob?: Blob
+  blob?: Blob
   // Duration in ms
-  localDuration?: number
-}
-
-export interface LocalProjectState {
-  tracks: Map<string, LocalTrackState>
+  duration?: number
 }

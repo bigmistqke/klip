@@ -22,7 +22,8 @@ import { publishProject } from "~/lib/atproto/records";
 import { resumeAudioContext } from "~/lib/audio/context";
 import { getMasterMixer } from "~/lib/audio/mixer";
 import { createRecorder, requestMediaAccess } from "~/lib/audio/recorder";
-import { useProject } from "~/lib/project/context";
+import { ProjectContext } from "~/lib/project/context";
+import { createProjectStore } from "~/lib/project/store";
 import { type Compositor, createCompositor } from "~/lib/video/compositor";
 import styles from "./Editor.module.css";
 import { Track } from "./Track";
@@ -47,7 +48,7 @@ const stopRecordingAction = action(
 
 export const Editor: Component<EditorProps> = (props) => {
   const { agent } = useAuth();
-  const project = useProject();
+  const project = createProjectStore();
 
   const [isPlaying, setIsPlaying] = createSignal(false);
   const [isRecording, setIsRecording] = createSignal(false);
@@ -251,18 +252,19 @@ export const Editor: Component<EditorProps> = (props) => {
       return;
     }
 
-    // Collect track blobs
-    const trackBlobs = new Map<string, { blob: Blob; duration: number }>();
-    for (let i = 0; i < 4; i++) {
-      const trackId = `track-${i}`;
-      const blob = project.getClipBlob(trackId);
-      const duration = project.getClipDuration(trackId);
-      if (blob && duration) {
-        trackBlobs.set(trackId, { blob, duration });
+    // Collect clip blobs
+    const clipBlobs = new Map<string, { blob: Blob; duration: number }>();
+    for (const track of project.store.project.tracks) {
+      for (const clip of track.clips) {
+        const blob = project.getClipBlob(clip.id);
+        const duration = project.getClipDuration(clip.id);
+        if (blob && duration) {
+          clipBlobs.set(clip.id, { blob, duration });
+        }
       }
     }
 
-    if (trackBlobs.size === 0) {
+    if (clipBlobs.size === 0) {
       alert("No recordings to publish");
       return;
     }
@@ -272,7 +274,7 @@ export const Editor: Component<EditorProps> = (props) => {
       const result = await publishProject(
         currentAgent,
         project.store.project,
-        trackBlobs,
+        clipBlobs,
       );
       alert(`Published! URI: ${result.uri}`);
     } catch (error) {
@@ -291,85 +293,87 @@ export const Editor: Component<EditorProps> = (props) => {
   }
 
   return (
-    <div class={styles.container}>
-      <Show when={project.isLoading()}>
-        <div class={styles.loadingOverlay}>Loading project...</div>
-      </Show>
-      <div class={styles.compositorContainer} ref={compositorContainer} />
-      <div class={styles.transport}>
-        <button
-          type="button"
-          class={styles.playButton}
-          onClick={handlePlayPause}
-          disabled={isRecording() || selectedTrack() !== null}
-        >
-          {isPlaying() ? <FiPause size={24} /> : <FiPlay size={24} />}
-        </button>
-        <button
-          type="button"
-          class={styles.recordButton}
-          classList={{ [styles.recording]: isRecording() }}
-          onClick={handleRecord}
-          disabled={
-            selectedTrack() === null ||
-            previewSubmission.pending ||
-            stopRecordingSubmission.pending
-          }
-        >
-          {isRecording() ? <FiSquare size={20} /> : <FiCircle size={20} />}
-        </button>
-        <button
-          type="button"
-          class={styles.stopButton}
-          onClick={handleStop}
-          disabled={isRecording() || selectedTrack() !== null}
-        >
-          <FiSquare size={20} />
-        </button>
-        <label class={styles.masterVolume}>
-          <FiVolume2 size={16} />
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={masterVolume()}
-            onInput={handleMasterVolumeChange}
-          />
-        </label>
-        <button
-          type="button"
-          class={styles.publishButton}
-          onClick={handlePublish}
-          disabled={
-            isRecording() ||
-            isPlaying() ||
-            isPublishing() ||
-            !hasAnyRecording() ||
-            !agent()
-          }
-        >
-          <FiUpload size={16} />
-          {isPublishing() ? "Publishing..." : "Publish"}
-        </button>
-      </div>
-      <div class={styles.grid}>
-        <For each={TRACK_IDS}>
-          {(id) => (
-            <Track
-              id={id}
-              isPlaying={isPlaying()}
-              isSelected={selectedTrack() === id}
-              isRecording={isRecording() && selectedTrack() === id}
-              isLoading={previewSubmission.pending && selectedTrack() === id}
-              currentTime={currentTime()}
-              onSelect={() => handleSelectTrack(id)}
-              onVideoChange={handleVideoChange}
-              onClear={() => handleClearRecording(id)}
+    <ProjectContext.Provider value={project}>
+      <div class={styles.container}>
+        <Show when={project.isLoading()}>
+          <div class={styles.loadingOverlay}>Loading project...</div>
+        </Show>
+        <div class={styles.compositorContainer} ref={compositorContainer} />
+        <div class={styles.transport}>
+          <button
+            type="button"
+            class={styles.playButton}
+            onClick={handlePlayPause}
+            disabled={isRecording() || selectedTrack() !== null}
+          >
+            {isPlaying() ? <FiPause size={24} /> : <FiPlay size={24} />}
+          </button>
+          <button
+            type="button"
+            class={styles.recordButton}
+            classList={{ [styles.recording]: isRecording() }}
+            onClick={handleRecord}
+            disabled={
+              selectedTrack() === null ||
+              previewSubmission.pending ||
+              stopRecordingSubmission.pending
+            }
+          >
+            {isRecording() ? <FiSquare size={20} /> : <FiCircle size={20} />}
+          </button>
+          <button
+            type="button"
+            class={styles.stopButton}
+            onClick={handleStop}
+            disabled={isRecording() || selectedTrack() !== null}
+          >
+            <FiSquare size={20} />
+          </button>
+          <label class={styles.masterVolume}>
+            <FiVolume2 size={16} />
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={masterVolume()}
+              onInput={handleMasterVolumeChange}
             />
-          )}
-        </For>
+          </label>
+          <button
+            type="button"
+            class={styles.publishButton}
+            onClick={handlePublish}
+            disabled={
+              isRecording() ||
+              isPlaying() ||
+              isPublishing() ||
+              !hasAnyRecording() ||
+              !agent()
+            }
+          >
+            <FiUpload size={16} />
+            {isPublishing() ? "Publishing..." : "Publish"}
+          </button>
+        </div>
+        <div class={styles.grid}>
+          <For each={TRACK_IDS}>
+            {(id) => (
+              <Track
+                id={id}
+                isPlaying={isPlaying()}
+                isSelected={selectedTrack() === id}
+                isRecording={isRecording() && selectedTrack() === id}
+                isLoading={previewSubmission.pending && selectedTrack() === id}
+                currentTime={currentTime()}
+                onSelect={() => handleSelectTrack(id)}
+                onVideoChange={handleVideoChange}
+                onClear={() => handleClearRecording(id)}
+              />
+            )}
+          </For>
+        </div>
       </div>
-    </div>
+    </ProjectContext.Provider>
   );
 };

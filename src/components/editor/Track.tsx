@@ -39,7 +39,12 @@ export const Track: Component<TrackProps> = (props) => {
 
   // Derived state from project store
   const hasRecording = createMemo(() => project.hasRecording(props.id));
-  const clipBlob = createMemo(() => project.getClipBlob(trackId));
+  const track = createMemo(() => project.store.project.tracks.find((t) => t.id === trackId));
+  const firstClip = createMemo(() => track()?.clips[0]);
+  const clipBlob = createMemo(() => {
+    const clip = firstClip();
+    return clip ? project.getClipBlob(clip.id) : undefined;
+  });
   const audioPipeline = createMemo(() => project.getTrackPipeline(trackId));
 
   // Helper to get effect value by index
@@ -158,8 +163,6 @@ export const Track: Component<TrackProps> = (props) => {
         return { min: 0, max: 1, step: 0.01, label: "Vol" };
       case "audio.pan":
         return { min: -1, max: 1, step: 0.01, label: "Pan" };
-      default:
-        return { min: 0, max: 1, step: 0.01, label: effect.type };
     }
   }
 
