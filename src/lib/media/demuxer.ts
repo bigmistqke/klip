@@ -87,20 +87,6 @@ export interface Demuxer {
 type VideoTrack = Track & { video: NonNullable<Track['video']> }
 type AudioTrack = Track & { audio: NonNullable<Track['audio']> }
 
-function normalizeSample(sample: Sample): DemuxedSample {
-  const timescale = sample.timescale
-  return {
-    number: sample.number,
-    trackId: sample.track_id,
-    pts: sample.cts / timescale,
-    dts: sample.dts / timescale,
-    duration: sample.duration / timescale,
-    isKeyframe: sample.is_sync,
-    data: sample.data ?? new Uint8Array(0),
-    size: sample.size,
-  }
-}
-
 function isVideoTrack(track: Track): track is VideoTrack {
   return track.video !== undefined
 }
@@ -194,6 +180,31 @@ export async function createDemuxer(source: ArrayBuffer | File): Promise<Demuxer
         return samples
       }
 
+      // Extract sample data from the buffer using offset and size
+      const extractSampleData = (sample: Sample): Uint8Array => {
+        // If sample already has data, return it
+        if (sample.data && sample.data.byteLength > 0) {
+          return sample.data
+        }
+        // Extract from buffer using offset and size
+        return new Uint8Array(buffer, sample.offset, sample.size)
+      }
+
+      // Normalize sample with extracted data
+      const normalizeSampleWithData = (sample: Sample): DemuxedSample => {
+        const timescale = sample.timescale
+        return {
+          number: sample.number,
+          trackId: sample.track_id,
+          pts: sample.cts / timescale,
+          dts: sample.dts / timescale,
+          duration: sample.duration / timescale,
+          isKeyframe: sample.is_sync,
+          data: extractSampleData(sample),
+          size: sample.size,
+        }
+      }
+
       resolve({
         info,
         file,
@@ -211,7 +222,7 @@ export async function createDemuxer(source: ArrayBuffer | File): Promise<Demuxer
               const pts = sample.cts / sample.timescale
               return pts >= startTime && pts < endTime
             })
-            .map(normalizeSample)
+            .map(normalizeSampleWithData)
         },
 
         async getAllSamples(trackId: number): Promise<DemuxedSample[]> {
@@ -221,7 +232,7 @@ export async function createDemuxer(source: ArrayBuffer | File): Promise<Demuxer
           }
 
           const allSamples = getSamplesForTrack(trackId)
-          return allSamples.map(normalizeSample)
+          return allSamples.map(normalizeSampleWithData)
         },
 
         async getKeyframeBefore(trackId: number, time: number): Promise<DemuxedSample | null> {
@@ -242,7 +253,7 @@ export async function createDemuxer(source: ArrayBuffer | File): Promise<Demuxer
             if (pts > time) break
           }
 
-          return lastKeyframe ? normalizeSample(lastKeyframe) : null
+          return lastKeyframe ? normalizeSampleWithData(lastKeyframe) : null
         },
 
         destroy() {
