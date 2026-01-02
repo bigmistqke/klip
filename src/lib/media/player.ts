@@ -271,11 +271,20 @@ export async function createPlayer(
       if (state === 'playing') return
 
       const startTime = time ?? getCurrentTime()
+      const previousState = state // Capture before changing
 
       setState('loading')
 
-      // Seek to start position if specified
-      if (time !== undefined || state === 'ready' || state === 'ended') {
+      // Seek to start position if:
+      // - explicit time provided
+      // - state was ready/ended (needs initialization)
+      // - frame buffer is empty (e.g., after stop())
+      const needsSeek = time !== undefined ||
+        previousState === 'ready' ||
+        previousState === 'ended' ||
+        (frameBuffer && frameBuffer.frameCount === 0)
+
+      if (needsSeek) {
         if (frameBuffer) {
           await frameBuffer.seekTo(startTime)
         }

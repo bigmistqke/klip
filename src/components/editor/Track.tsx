@@ -104,28 +104,44 @@ export const Track: Component<TrackProps> = (props) => {
     }
   });
 
-  // Track last seeked time to avoid infinite loops
-  let lastSeekedTime: number | undefined;
+  // Track last state to detect stop vs pause
+  let lastIsPlaying: boolean | undefined;
+  let lastCurrentTime: number | undefined;
 
-  // React to global play/pause and seek
+  // React to global play/pause/stop and seek
   createEffect(() => {
     if (!hasRecording() || !playerHook.isReady()) return;
 
-    // Seek if currentTime is specified and different from last seek
-    if (props.currentTime !== undefined && props.currentTime !== lastSeekedTime) {
-      lastSeekedTime = props.currentTime;
-      playerHook.seek(props.currentTime).catch(() => {
+    const isPlaying = props.isPlaying;
+    const currentTime = props.currentTime;
+
+    // Detect stop: was playing (or had a position), now not playing with currentTime=0
+    const isStop = !isPlaying && currentTime === 0 && (lastIsPlaying || lastCurrentTime !== 0);
+
+    if (isStop) {
+      // Call stop() which properly resets the player
+      playerHook.stop();
+    } else if (currentTime !== undefined && currentTime !== lastCurrentTime) {
+      // Seek to new time
+      playerHook.seek(currentTime).catch(() => {
         // Ignore seek errors during rapid state changes
       });
     }
 
-    if (props.isPlaying) {
-      playerHook.play().catch(() => {
-        // Ignore play errors
-      });
-    } else {
-      playerHook.pause();
+    // Handle play/pause (but not if we just stopped)
+    if (!isStop) {
+      if (isPlaying) {
+        playerHook.play().catch(() => {
+          // Ignore play errors
+        });
+      } else if (lastIsPlaying) {
+        // Only pause if we were previously playing (not on initial load)
+        playerHook.pause();
+      }
     }
+
+    lastIsPlaying = isPlaying;
+    lastCurrentTime = currentTime;
   });
 
   function handleClear() {
