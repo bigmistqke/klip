@@ -11,7 +11,7 @@
     "@atproto/api": "^0.13.0",
     "@atproto/lexicon": "^0.6.0",
     "@atproto/oauth-client-browser": "^0.3.0",
-    "@bigmistqke/lexicon-to-valibot": "^0.1.4",
+    "@bigmistqke/lexicon-to-valibot": "^0.1.6",
     "@bigmistqke/view.gl": "^0.1.9",
     "@bigmistqke/worker-proxy": "^0.0.13",
     "@solidjs/router": "^0.15.0",
