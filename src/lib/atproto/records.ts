@@ -92,16 +92,8 @@ export async function getStemBlob(agent: Agent, stemUri: string): Promise<Blob> 
   const stem = await getStem(agent, stemUri)
   const blob = stem.value.blob
 
-  // Handle both typed (ref.$link) and untyped (cid) blob formats
-  let blobCid: string
-  if ('ref' in blob) {
-    // TypedBlobRef: ref is a CID object at runtime
-    const ref = blob.ref as unknown as { toString(): string }
-    blobCid = ref.toString()
-  } else {
-    // UntypedBlobRef: cid is already a string
-    blobCid = blob.cid
-  }
+  // Handle both BlobRef (ref is CID) and untyped (cid is string) formats
+  const blobCid = 'ref' in blob ? blob.ref.toString() : blob.cid
 
   console.log('Fetching blob:', { did: repo, cid: blobCid })
 

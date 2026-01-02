@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@bigmistqke/lexicon-to-valibot': link:../lexicon-to-valibot
+
 importers:
 
   .:
@@ -18,8 +21,8 @@ importers:
         specifier: ^0.3.0
         version: 0.3.38
       '@bigmistqke/lexicon-to-valibot':
-        specifier: ^0.1.2
-        version: 0.1.2(valibot@1.2.0(typescript@5.9.3))
+        specifier: link:../lexicon-to-valibot
+        version: link:../lexicon-to-valibot
       '@bigmistqke/view.gl':
         specifier: ^0.1.9
         version: 0.1.9
@@ -212,11 +215,6 @@ packages:
   '@babel/types@7.28.5':
     resolution: {integrity: sha512-qQ5m48eI/MFLQ5PxQj4PFaprjyCTLI37ElWMmNs0K8Lk3dVeOdNpB3ks8jc7yM5CDmVC73eMVk/trk3fgmrUpA==}
     engines: {node: '>=6.9.0'}
-
-  '@bigmistqke/lexicon-to-valibot@0.1.2':
-    resolution: {integrity: sha512-+6GXocrEx3JqBiPkCWOZ1Lre3zxRYISNEiN+ckKQ2nSbpgf7qw5j/SWFbt9cdVv6j/5lK2ohQ72RCj57aBxMqw==}
-    peerDependencies:
-      valibot: '>=1.0.0'
 
   '@bigmistqke/view.gl@0.1.9':
     resolution: {integrity: sha512-Xxi6EHwNRwLSmKEtTCDAjlmA9Q9MxVznXfZ73mIcXD/1zTVuV4z8ycVYCNW2w+1TDqXtUYuvv2H1+crf+VV9GA==}
@@ -1080,10 +1078,6 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
-
-  '@bigmistqke/lexicon-to-valibot@0.1.2(valibot@1.2.0(typescript@5.9.3))':
-    dependencies:
-      valibot: 1.2.0(typescript@5.9.3)
 
   '@bigmistqke/view.gl@0.1.9': {}
 
