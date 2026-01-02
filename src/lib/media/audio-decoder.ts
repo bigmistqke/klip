@@ -1,75 +1,7 @@
-import { DataStream, MP4BoxBuffer, Endianness, type SampleEntry, type Box } from 'mp4box'
 import type { DemuxedSample, AudioTrackInfo, Demuxer } from './demuxer'
 
-/** Audio codec configuration extracted from mp4box sample description */
-export interface AudioCodecConfig {
-  codec: string
-  sampleRate: number
-  numberOfChannels: number
-  description?: ArrayBuffer
-}
-
-type AudioSampleEntry = SampleEntry & {
-  channel_count: number
-  samplerate: number
-  esds?: Box & { write(stream: DataStream): void }
-  dOps?: Box & { write(stream: DataStream): void }
-  fLaC?: Box & { write(stream: DataStream): void }
-  getCodec(): string
-}
-
-/**
- * Extract codec configuration from an audio track's sample description
- * This is needed to configure the WebCodecs AudioDecoder
- */
-export function getAudioCodecConfig(
-  demuxer: Demuxer,
-  trackInfo: AudioTrackInfo
-): AudioCodecConfig {
-  // Get the track from the file to access sample descriptions
-  const track = demuxer.file.getTrackById(trackInfo.id)
-  if (!track) {
-    throw new Error(`Track ${trackInfo.id} not found in file`)
-  }
-
-  // Get the sample description (stsd entry)
-  const stsd = track.mdia?.minf?.stbl?.stsd
-  if (!stsd || !stsd.entries || stsd.entries.length === 0) {
-    throw new Error(`No sample description found for track ${trackInfo.id}`)
-  }
-
-  const sampleEntry = stsd.entries[0] as AudioSampleEntry
-  const codec = sampleEntry.getCodec()
-
-  const config: AudioCodecConfig = {
-    codec,
-    sampleRate: sampleEntry.samplerate,
-    numberOfChannels: sampleEntry.channel_count,
-  }
-
-  // Extract decoder-specific configuration
-  // AAC uses esds, Opus uses dOps, FLAC uses fLaC
-  const configBox = sampleEntry.esds || sampleEntry.dOps || sampleEntry.fLaC
-
-  if (configBox) {
-    config.description = serializeBox(configBox)
-  }
-
-  return config
-}
-
-/**
- * Serialize a box to an ArrayBuffer
- */
-function serializeBox(box: Box & { write(stream: DataStream): void }): ArrayBuffer {
-  const buffer = MP4BoxBuffer.fromArrayBuffer(new ArrayBuffer(1024), 0)
-  const stream = new DataStream(buffer, 0, Endianness.BIG_ENDIAN)
-  box.write(stream)
-  return buffer.slice(0, stream.getPosition())
-}
-
 export interface AudioDecoderHandle {
-  readonly config: AudioCodecConfig
+  readonly config: AudioDecoderConfig
   readonly decoder: AudioDecoder
 
   /**
@@ -118,18 +50,14 @@ export interface CreateAudioDecoderOptions {
  */
 export async function createAudioDecoder(
   demuxer: Demuxer,
-  trackInfo: AudioTrackInfo,
+  _trackInfo: AudioTrackInfo,
   options: CreateAudioDecoderOptions = {}
 ): Promise<AudioDecoderHandle> {
-  const config = getAudioCodecConfig(demuxer, trackInfo)
+  // Get config directly from web-demuxer
+  const config = await demuxer.getAudioConfig()
 
   // Check if the codec is supported
-  const support = await AudioDecoder.isConfigSupported({
-    codec: config.codec,
-    sampleRate: config.sampleRate,
-    numberOfChannels: config.numberOfChannels,
-    description: config.description,
-  })
+  const support = await AudioDecoder.isConfigSupported(config)
 
   if (!support.supported) {
     throw new Error(`Audio codec ${config.codec} is not supported`)
@@ -160,12 +88,7 @@ export async function createAudioDecoder(
     },
   })
 
-  decoder.configure({
-    codec: config.codec,
-    sampleRate: config.sampleRate,
-    numberOfChannels: config.numberOfChannels,
-    description: config.description,
-  })
+  decoder.configure(config)
 
   return {
     config,
@@ -231,12 +154,7 @@ export async function createAudioDecoder(
     async reset(): Promise<void> {
       decoder.reset()
       // Re-configure after reset
-      decoder.configure({
-        codec: config.codec,
-        sampleRate: config.sampleRate,
-        numberOfChannels: config.numberOfChannels,
-        description: config.description,
-      })
+      decoder.configure(config)
       // Clear any pending data
       for (const data of pendingData) {
         data.close()

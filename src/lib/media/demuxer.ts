@@ -1,7 +1,8 @@
-import { createFile, type ISOFile, type Movie, type Track, type Sample, MP4BoxBuffer } from 'mp4box'
+import { WebDemuxer, AVMediaType, AVSeekFlag, type WebMediaInfo, type WebAVStream, type WebAVPacket } from 'web-demuxer'
 
 export interface VideoTrackInfo {
   id: number
+  index: number
   codec: string
   width: number
   height: number
@@ -13,6 +14,7 @@ export interface VideoTrackInfo {
 
 export interface AudioTrackInfo {
   id: number
+  index: number
   codec: string
   sampleRate: number
   channelCount: number
@@ -51,11 +53,18 @@ export interface DemuxedSample {
   size: number
 }
 
-export { type Sample }
-
 export interface Demuxer {
   readonly info: DemuxerInfo
-  readonly file: ISOFile
+
+  /**
+   * Get WebCodecs VideoDecoderConfig for the video track
+   */
+  getVideoConfig(): Promise<VideoDecoderConfig>
+
+  /**
+   * Get WebCodecs AudioDecoderConfig for the audio track
+   */
+  getAudioConfig(): Promise<AudioDecoderConfig>
 
   /**
    * Get samples from a track within a time range
@@ -84,187 +93,208 @@ export interface Demuxer {
   destroy(): void
 }
 
-type VideoTrack = Track & { video: NonNullable<Track['video']> }
-type AudioTrack = Track & { audio: NonNullable<Track['audio']> }
-
-function isVideoTrack(track: Track): track is VideoTrack {
-  return track.video !== undefined
+function parseSampleCount(nbFrames: string): number {
+  const count = parseInt(nbFrames)
+  // WebM containers often don't have valid nb_frames, return 0 for invalid values
+  if (!Number.isFinite(count) || count < 0) {
+    return 0
+  }
+  return count
 }
 
-function isAudioTrack(track: Track): track is AudioTrack {
-  return track.audio !== undefined
+function parseDuration(duration: number): number {
+  // MediaRecorder WebM files may have invalid duration (AV_NOPTS_VALUE)
+  if (!Number.isFinite(duration) || duration < 0) {
+    return 0
+  }
+  return duration
 }
 
-function parseVideoTrack(track: VideoTrack): VideoTrackInfo {
+function parseVideoTrack(stream: WebAVStream, index: number): VideoTrackInfo {
   return {
-    id: track.id,
-    codec: track.codec,
-    width: track.video.width,
-    height: track.video.height,
-    duration: track.duration / track.timescale,
-    timescale: track.timescale,
-    sampleCount: track.nb_samples,
-    bitrate: track.bitrate,
+    id: stream.id,
+    index,
+    codec: stream.codec_string,
+    width: stream.width,
+    height: stream.height,
+    duration: parseDuration(stream.duration),
+    timescale: 1, // web-demuxer uses seconds directly
+    sampleCount: parseSampleCount(stream.nb_frames),
+    bitrate: parseInt(stream.bit_rate) || 0,
   }
 }
 
-function parseAudioTrack(track: AudioTrack): AudioTrackInfo {
+function parseAudioTrack(stream: WebAVStream, index: number): AudioTrackInfo {
   return {
-    id: track.id,
-    codec: track.codec,
-    sampleRate: track.audio.sample_rate,
-    channelCount: track.audio.channel_count,
-    sampleSize: track.audio.sample_size,
-    duration: track.duration / track.timescale,
-    timescale: track.timescale,
-    sampleCount: track.nb_samples,
-    bitrate: track.bitrate,
+    id: stream.id,
+    index,
+    codec: stream.codec_string,
+    sampleRate: stream.sample_rate,
+    channelCount: stream.channels,
+    sampleSize: 16, // Default, web-demuxer doesn't expose this directly
+    duration: parseDuration(stream.duration),
+    timescale: 1, // web-demuxer uses seconds directly
+    sampleCount: parseSampleCount(stream.nb_frames),
+    bitrate: parseInt(stream.bit_rate) || 0,
   }
 }
 
-function parseInfo(info: Movie): DemuxerInfo {
+function parseInfo(mediaInfo: WebMediaInfo): DemuxerInfo {
   const videoTracks: VideoTrackInfo[] = []
   const audioTracks: AudioTrackInfo[] = []
 
-  for (const track of info.tracks) {
-    if (isVideoTrack(track)) {
-      videoTracks.push(parseVideoTrack(track))
-    } else if (isAudioTrack(track)) {
-      audioTracks.push(parseAudioTrack(track))
+  for (const stream of mediaInfo.streams) {
+    if (stream.codec_type === AVMediaType.AVMEDIA_TYPE_VIDEO) {
+      videoTracks.push(parseVideoTrack(stream, stream.index))
+    } else if (stream.codec_type === AVMediaType.AVMEDIA_TYPE_AUDIO) {
+      audioTracks.push(parseAudioTrack(stream, stream.index))
     }
   }
 
   return {
-    duration: info.duration / info.timescale,
-    timescale: info.timescale,
-    isFragmented: info.isFragmented,
+    duration: parseDuration(mediaInfo.duration),
+    timescale: 1, // web-demuxer uses seconds
+    isFragmented: false, // web-demuxer doesn't expose this
     videoTracks,
     audioTracks,
   }
 }
 
+function packetToSample(packet: WebAVPacket, trackId: number, sampleNumber: number): DemuxedSample {
+  return {
+    number: sampleNumber,
+    trackId,
+    pts: packet.timestamp / 1_000_000, // Convert from microseconds to seconds
+    dts: packet.timestamp / 1_000_000, // DTS same as PTS for most cases
+    duration: packet.duration / 1_000_000,
+    isKeyframe: packet.keyframe === 1,
+    data: packet.data,
+    size: packet.size,
+  }
+}
+
+async function collectStream<T>(stream: ReadableStream<T>): Promise<T[]> {
+  const reader = stream.getReader()
+  const items: T[] = []
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    items.push(value)
+  }
+
+  return items
+}
+
 export async function createDemuxer(source: ArrayBuffer | File): Promise<Demuxer> {
-  const file = createFile()
-
-  const buffer = source instanceof File ? await source.arrayBuffer() : source
-
-  return new Promise((resolve, reject) => {
-    file.onError = (module: string, message: string) => {
-      reject(new Error(`MP4Box error in ${module}: ${message}`))
-    }
-
-    file.onReady = (mp4Info: Movie) => {
-      const info = parseInfo(mp4Info)
-
-      // Build sample lists so we can access individual samples
-      file.buildSampleLists()
-
-      // Helper to get track info by ID
-      const getTrackInfo = (trackId: number) => {
-        return [...info.videoTracks, ...info.audioTracks].find(t => t.id === trackId)
-      }
-
-      // Cache for extracted samples per track
-      const samplesCache = new Map<number, Sample[]>()
-
-      // Get all samples for a track using getTrackSamplesInfo
-      const getSamplesForTrack = (trackId: number): Sample[] => {
-        // Return cached samples if available
-        const cached = samplesCache.get(trackId)
-        if (cached) {
-          return cached
-        }
-
-        const samples = file.getTrackSamplesInfo(trackId)
-        samplesCache.set(trackId, samples)
-        return samples
-      }
-
-      // Extract sample data from the buffer using offset and size
-      const extractSampleData = (sample: Sample): Uint8Array => {
-        // If sample already has data, return it
-        if (sample.data && sample.data.byteLength > 0) {
-          return sample.data
-        }
-        // Extract from buffer using offset and size
-        return new Uint8Array(buffer, sample.offset, sample.size)
-      }
-
-      // Normalize sample with extracted data
-      const normalizeSampleWithData = (sample: Sample): DemuxedSample => {
-        const timescale = sample.timescale
-        return {
-          number: sample.number,
-          trackId: sample.track_id,
-          pts: sample.cts / timescale,
-          dts: sample.dts / timescale,
-          duration: sample.duration / timescale,
-          isKeyframe: sample.is_sync,
-          data: extractSampleData(sample),
-          size: sample.size,
-        }
-      }
-
-      resolve({
-        info,
-        file,
-
-        async getSamples(trackId: number, startTime: number, endTime: number): Promise<DemuxedSample[]> {
-          const trackInfo = getTrackInfo(trackId)
-          if (!trackInfo) {
-            throw new Error(`Track ${trackId} not found`)
-          }
-
-          const allSamples = getSamplesForTrack(trackId)
-
-          return allSamples
-            .filter(sample => {
-              const pts = sample.cts / sample.timescale
-              return pts >= startTime && pts < endTime
-            })
-            .map(normalizeSampleWithData)
-        },
-
-        async getAllSamples(trackId: number): Promise<DemuxedSample[]> {
-          const trackInfo = getTrackInfo(trackId)
-          if (!trackInfo) {
-            throw new Error(`Track ${trackId} not found`)
-          }
-
-          const allSamples = getSamplesForTrack(trackId)
-          return allSamples.map(normalizeSampleWithData)
-        },
-
-        async getKeyframeBefore(trackId: number, time: number): Promise<DemuxedSample | null> {
-          const trackInfo = getTrackInfo(trackId)
-          if (!trackInfo) {
-            throw new Error(`Track ${trackId} not found`)
-          }
-
-          const allSamples = getSamplesForTrack(trackId)
-
-          // Find the last keyframe at or before the given time
-          let lastKeyframe: Sample | null = null
-          for (const sample of allSamples) {
-            const pts = sample.cts / sample.timescale
-            if (sample.is_sync && pts <= time) {
-              lastKeyframe = sample
-            }
-            if (pts > time) break
-          }
-
-          return lastKeyframe ? normalizeSampleWithData(lastKeyframe) : null
-        },
-
-        destroy() {
-          file.flush()
-          samplesCache.clear()
-        },
-      })
-    }
-
-    const mp4Buffer = MP4BoxBuffer.fromArrayBuffer(buffer, 0)
-    file.appendBuffer(mp4Buffer)
-    file.flush()
+  const demuxer = new WebDemuxer({
+    // Use CDN for WASM file
+    wasmFilePath: 'https://cdn.jsdelivr.net/npm/web-demuxer@latest/dist/wasm-files/web-demuxer.wasm',
   })
+
+  // Convert ArrayBuffer to File if needed (web-demuxer only accepts File or URL)
+  let file: File
+  if (source instanceof ArrayBuffer) {
+    // Detect format from magic bytes
+    const view = new Uint8Array(source)
+    let mimeType = 'video/mp4' // default
+
+    // WebM/MKV starts with EBML header: 0x1A 0x45 0xDF 0xA3
+    if (view[0] === 0x1A && view[1] === 0x45 && view[2] === 0xDF && view[3] === 0xA3) {
+      mimeType = 'video/webm'
+    }
+
+    file = new File([source], 'video', { type: mimeType })
+  } else {
+    file = source
+  }
+
+  await demuxer.load(file)
+
+  const mediaInfo = await demuxer.getMediaInfo()
+  const info = parseInfo(mediaInfo)
+
+  // Build track index mapping (trackId -> stream info)
+  const trackMap = new Map<number, { type: 'video' | 'audio', index: number }>()
+  for (const track of info.videoTracks) {
+    trackMap.set(track.id, { type: 'video', index: track.index })
+  }
+  for (const track of info.audioTracks) {
+    trackMap.set(track.id, { type: 'audio', index: track.index })
+  }
+
+  return {
+    info,
+
+    async getVideoConfig(): Promise<VideoDecoderConfig> {
+      if (info.videoTracks.length === 0) {
+        throw new Error('No video track available')
+      }
+      return demuxer.getDecoderConfig('video')
+    },
+
+    async getAudioConfig(): Promise<AudioDecoderConfig> {
+      if (info.audioTracks.length === 0) {
+        throw new Error('No audio track available')
+      }
+      return demuxer.getDecoderConfig('audio')
+    },
+
+    async getSamples(trackId: number, startTime: number, endTime: number): Promise<DemuxedSample[]> {
+      const trackInfo = trackMap.get(trackId)
+      if (!trackInfo) {
+        throw new Error(`Track ${trackId} not found`)
+      }
+
+      try {
+        // Use readMediaPacket which handles stream selection by type
+        const stream = demuxer.readMediaPacket(trackInfo.type, startTime, endTime)
+        const packets = await collectStream(stream)
+        return packets.map((packet, i) => packetToSample(packet, trackId, i))
+      } catch (err) {
+        console.error(`Failed to get samples for track ${trackId}:`, err)
+        return []
+      }
+    },
+
+    async getAllSamples(trackId: number): Promise<DemuxedSample[]> {
+      const trackInfo = trackMap.get(trackId)
+      if (!trackInfo) {
+        throw new Error(`Track ${trackId} not found`)
+      }
+
+      try {
+        // Use readMediaPacket which handles stream selection by type
+        const stream = demuxer.readMediaPacket(trackInfo.type, 0, info.duration)
+        const packets = await collectStream(stream)
+        return packets.map((packet, i) => packetToSample(packet, trackId, i))
+      } catch (err) {
+        console.error(`Failed to get all samples for track ${trackId}:`, err)
+        return []
+      }
+    },
+
+    async getKeyframeBefore(trackId: number, time: number): Promise<DemuxedSample | null> {
+      const trackInfo = trackMap.get(trackId)
+      if (!trackInfo) {
+        throw new Error(`Track ${trackId} not found`)
+      }
+
+      try {
+        // Use seekMediaPacket which handles stream selection by type
+        // AVSEEK_FLAG_BACKWARD seeks to keyframe at or before time
+        const packet = await demuxer.seekMediaPacket(trackInfo.type, time, AVSeekFlag.AVSEEK_FLAG_BACKWARD)
+
+        if (!packet) return null
+
+        return packetToSample(packet, trackId, 0)
+      } catch {
+        return null
+      }
+    },
+
+    destroy() {
+      demuxer.destroy()
+    },
+  }
 }

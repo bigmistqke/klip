@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createDemuxer, type Demuxer } from '../demuxer'
 import {
   createAudioDecoder,
-  getAudioCodecConfig,
   isAudioDecoderSupported,
   isAudioCodecSupported,
   type AudioDecoderHandle,
@@ -40,7 +39,7 @@ describe('Audio Decoder - Codec Configuration', () => {
   let demuxer: Demuxer
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-opus.mp4')
+    testBuffer = await loadFixture('test-opus.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -52,9 +51,9 @@ describe('Audio Decoder - Codec Configuration', () => {
     expect(demuxer.info.audioTracks.length).toBeGreaterThan(0)
   })
 
-  it('should extract codec config from audio track', () => {
+  it('should get audio decoder config', async () => {
     const audioTrack = demuxer.info.audioTracks[0]
-    const config = getAudioCodecConfig(demuxer, audioTrack)
+    const config = await demuxer.getAudioConfig()
 
     expect(config.codec).toBeDefined()
     expect(config.codec.length).toBeGreaterThan(0)
@@ -62,14 +61,16 @@ describe('Audio Decoder - Codec Configuration', () => {
     expect(config.numberOfChannels).toBe(audioTrack.channelCount)
   })
 
-  it('should have codec description for Opus', () => {
-    const audioTrack = demuxer.info.audioTracks[0]
-    const config = getAudioCodecConfig(demuxer, audioTrack)
+  it('should have codec description for Opus', async () => {
+    const config = await demuxer.getAudioConfig()
 
     // Opus requires dOps description
     if (config.codec.startsWith('opus') || config.codec === 'opus') {
-      expect(config.description).toBeInstanceOf(ArrayBuffer)
-      expect(config.description!.byteLength).toBeGreaterThan(0)
+      // web-demuxer returns Uint8Array, which is valid for WebCodecs
+      expect(config.description).toBeDefined()
+      const desc = config.description as Uint8Array | ArrayBuffer
+      const length = desc instanceof ArrayBuffer ? desc.byteLength : desc.length
+      expect(length).toBeGreaterThan(0)
     }
   })
 })
@@ -80,7 +81,7 @@ describe('Audio Decoder - Decoding (Opus)', () => {
   let decoder: AudioDecoderHandle
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-opus.mp4')
+    testBuffer = await loadFixture('test-opus.webm')
     demuxer = await createDemuxer(testBuffer)
 
     const audioTrack = demuxer.info.audioTracks[0]
@@ -160,7 +161,7 @@ describe('Audio Decoder - Error Handling', () => {
   let demuxer: Demuxer
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-opus.mp4')
+    testBuffer = await loadFixture('test-opus.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -168,19 +169,7 @@ describe('Audio Decoder - Error Handling', () => {
     demuxer.destroy()
   })
 
-  it('should throw for invalid track ID', () => {
-    const fakeTrackInfo = {
-      id: 9999,
-      codec: 'opus',
-      sampleRate: 48000,
-      channelCount: 2,
-      sampleSize: 16,
-      duration: 10,
-      timescale: 1000,
-      sampleCount: 100,
-      bitrate: 64000,
-    }
-
-    expect(() => getAudioCodecConfig(demuxer, fakeTrackInfo)).toThrow()
+  it('should throw for invalid track ID when getting samples', async () => {
+    await expect(demuxer.getAllSamples(9999)).rejects.toThrow('Track 9999 not found')
   })
 })

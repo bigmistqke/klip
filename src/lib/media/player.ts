@@ -196,8 +196,8 @@ export async function createPlayer(
 
     const currentTime = getCurrentTime()
 
-    // Check if we've reached the end
-    if (currentTime >= duration) {
+    // Check if we've reached the end (only if duration is known)
+    if (duration > 0 && currentTime >= duration) {
       setState('ended')
       return
     }

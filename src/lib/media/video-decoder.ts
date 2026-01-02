@@ -1,82 +1,7 @@
-import { DataStream, MP4BoxBuffer, Endianness, type Sample, type SampleEntry, type Box } from 'mp4box'
 import type { DemuxedSample, VideoTrackInfo, Demuxer } from './demuxer'
 
-/** Codec configuration extracted from mp4box sample description */
-export interface CodecConfig {
-  codec: string
-  codedWidth: number
-  codedHeight: number
-  description?: ArrayBuffer
-}
-
-type VisualSampleEntry = SampleEntry & {
-  width: number
-  height: number
-  avcC?: Box & { write(stream: DataStream): void }
-  hvcC?: Box & { write(stream: DataStream): void }
-  av1C?: Box & { write(stream: DataStream): void }
-  vvcC?: Box & { write(stream: DataStream): void }
-  vpcC?: Box & { write(stream: DataStream): void }
-  getCodec(): string
-}
-
-/**
- * Extract codec configuration from a video track's sample description
- * This is needed to configure the WebCodecs VideoDecoder
- */
-export function getCodecConfig(
-  demuxer: Demuxer,
-  trackInfo: VideoTrackInfo
-): CodecConfig {
-  // Get the track from the file to access sample descriptions
-  const track = demuxer.file.getTrackById(trackInfo.id)
-  if (!track) {
-    throw new Error(`Track ${trackInfo.id} not found in file`)
-  }
-
-  // Get the sample description (stsd entry)
-  const stsd = track.mdia?.minf?.stbl?.stsd
-  if (!stsd || !stsd.entries || stsd.entries.length === 0) {
-    throw new Error(`No sample description found for track ${trackInfo.id}`)
-  }
-
-  const sampleEntry = stsd.entries[0] as VisualSampleEntry
-  const codec = sampleEntry.getCodec()
-
-  const config: CodecConfig = {
-    codec,
-    codedWidth: sampleEntry.width,
-    codedHeight: sampleEntry.height,
-  }
-
-  // Extract decoder-specific configuration (avcC, hvcC, etc.)
-  const configBox = sampleEntry.avcC || sampleEntry.hvcC || sampleEntry.av1C || sampleEntry.vvcC || sampleEntry.vpcC
-
-  if (configBox) {
-    config.description = serializeBox(configBox)
-  }
-
-  return config
-}
-
-/**
- * Serialize a box to an ArrayBuffer
- */
-function serializeBox(box: Box & { write(stream: DataStream): void }): ArrayBuffer {
-  // Create a DataStream to write to
-  // We need to estimate the size - most codec configs are under 1KB
-  const buffer = MP4BoxBuffer.fromArrayBuffer(new ArrayBuffer(1024), 0)
-  const stream = new DataStream(buffer, 0, Endianness.BIG_ENDIAN)
-
-  // Write the box
-  box.write(stream)
-
-  // Return only the written portion
-  return buffer.slice(0, stream.getPosition())
-}
-
 export interface VideoDecoderHandle {
-  readonly config: CodecConfig
+  readonly config: VideoDecoderConfig
   readonly decoder: VideoDecoder
 
   /**
@@ -130,17 +55,15 @@ export interface CreateVideoDecoderOptions {
  */
 export async function createVideoDecoder(
   demuxer: Demuxer,
-  trackInfo: VideoTrackInfo,
+  _trackInfo: VideoTrackInfo,
   options: CreateVideoDecoderOptions = {}
 ): Promise<VideoDecoderHandle> {
-  const config = getCodecConfig(demuxer, trackInfo)
+  // Get config directly from web-demuxer
+  const config = await demuxer.getVideoConfig()
 
   // Check if the codec is supported
   const support = await VideoDecoder.isConfigSupported({
-    codec: config.codec,
-    codedWidth: config.codedWidth,
-    codedHeight: config.codedHeight,
-    description: config.description,
+    ...config,
     hardwareAcceleration: options.hardwareAcceleration,
   })
 
@@ -174,10 +97,7 @@ export async function createVideoDecoder(
   })
 
   decoder.configure({
-    codec: config.codec,
-    codedWidth: config.codedWidth,
-    codedHeight: config.codedHeight,
-    description: config.description,
+    ...config,
     hardwareAcceleration: options.hardwareAcceleration,
   })
 
@@ -248,10 +168,7 @@ export async function createVideoDecoder(
       decoder.reset()
       // Re-configure after reset
       decoder.configure({
-        codec: config.codec,
-        codedWidth: config.codedWidth,
-        codedHeight: config.codedHeight,
-        description: config.description,
+        ...config,
         hardwareAcceleration: options.hardwareAcceleration,
       })
       // Clear any pending frames

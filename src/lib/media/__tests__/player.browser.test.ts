@@ -17,7 +17,7 @@ describe('Player - Creation (Video Only)', () => {
   let player: Player | null = null
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -59,7 +59,7 @@ describe('Player - Creation (Audio Only)', () => {
   let player: Player | null = null
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-opus.mp4')
+    testBuffer = await loadFixture('test-opus.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -95,7 +95,7 @@ describe('Player - Playback State (Video)', () => {
   let player: Player
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -158,7 +158,7 @@ describe('Player - Seeking (Video)', () => {
   let player: Player
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -206,7 +206,7 @@ describe('Player - Frame Retrieval', () => {
   let player: Player
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -244,7 +244,7 @@ describe('Player - Callbacks', () => {
   let player: Player
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -321,7 +321,7 @@ describe('Player - Cleanup', () => {
   let demuxer: Demuxer
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 

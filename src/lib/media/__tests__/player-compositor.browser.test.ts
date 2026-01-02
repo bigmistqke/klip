@@ -64,7 +64,7 @@ describe('Player-Compositor Integration - Attaching Players', () => {
   let playerCompositor: PlayerCompositor
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
     player = await createPlayer(demuxer)
     compositor = createCompositor(640, 480)
@@ -120,7 +120,7 @@ describe('Player-Compositor Integration - Rendering', () => {
   let playerCompositor: PlayerCompositor
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
     player = await createPlayer(demuxer)
     compositor = createCompositor(640, 480)
@@ -177,7 +177,7 @@ describe('Player-Compositor Integration - Multi-Track Setup', () => {
   let compositor: Compositor
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer1 = await createDemuxer(testBuffer)
     demuxer2 = await createDemuxer(testBuffer)
     player1 = await createPlayer(demuxer1)

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createDemuxer, type Demuxer } from '../demuxer'
 import {
   createVideoDecoder,
-  getCodecConfig,
   isVideoDecoderSupported,
   isCodecSupported,
   type VideoDecoderHandle,
@@ -40,7 +39,7 @@ describe('Video Decoder - Codec Configuration', () => {
   let demuxer: Demuxer
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -48,9 +47,9 @@ describe('Video Decoder - Codec Configuration', () => {
     demuxer.destroy()
   })
 
-  it('should extract codec config from video track', () => {
+  it('should get video decoder config', async () => {
     const videoTrack = demuxer.info.videoTracks[0]
-    const config = getCodecConfig(demuxer, videoTrack)
+    const config = await demuxer.getVideoConfig()
 
     expect(config.codec).toBeDefined()
     expect(config.codec.length).toBeGreaterThan(0)
@@ -58,23 +57,11 @@ describe('Video Decoder - Codec Configuration', () => {
     expect(config.codedHeight).toBe(videoTrack.height)
   })
 
-  it('should have codec description for H.264', () => {
-    const videoTrack = demuxer.info.videoTracks[0]
-    const config = getCodecConfig(demuxer, videoTrack)
+  it('should have valid codec string format for VP9', async () => {
+    const config = await demuxer.getVideoConfig()
 
-    // H.264 requires avcC description
-    if (config.codec.startsWith('avc1')) {
-      expect(config.description).toBeInstanceOf(ArrayBuffer)
-      expect(config.description!.byteLength).toBeGreaterThan(0)
-    }
-  })
-
-  it('should have valid codec string format', () => {
-    const videoTrack = demuxer.info.videoTracks[0]
-    const config = getCodecConfig(demuxer, videoTrack)
-
-    // Should be in format like "avc1.42001E" or "hev1.1.6.L93.B0"
-    expect(config.codec).toMatch(/^(avc1|avc3|hev1|hvc1|vp8|vp9|av01)\./i)
+    // VP9 codec string format
+    expect(config.codec).toMatch(/^vp09/)
   })
 })
 
@@ -86,7 +73,7 @@ describe('Video Decoder - Decoding (VP9)', () => {
   let decoder: VideoDecoderHandle
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test-vp9.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
 
     const videoTrack = demuxer.info.videoTracks[0]
@@ -166,7 +153,7 @@ describe('Video Decoder - Error Handling', () => {
   let demuxer: Demuxer
 
   beforeAll(async () => {
-    testBuffer = await loadFixture('test.mp4')
+    testBuffer = await loadFixture('test-vp9.webm')
     demuxer = await createDemuxer(testBuffer)
   })
 
@@ -174,18 +161,7 @@ describe('Video Decoder - Error Handling', () => {
     demuxer.destroy()
   })
 
-  it('should throw for invalid track ID', () => {
-    const fakeTrackInfo = {
-      id: 9999,
-      codec: 'avc1.42001E',
-      width: 1920,
-      height: 1080,
-      duration: 10,
-      timescale: 1000,
-      sampleCount: 100,
-      bitrate: 1000000,
-    }
-
-    expect(() => getCodecConfig(demuxer, fakeTrackInfo)).toThrow()
+  it('should throw for invalid track ID when getting samples', async () => {
+    await expect(demuxer.getAllSamples(9999)).rejects.toThrow('Track 9999 not found')
   })
 })
