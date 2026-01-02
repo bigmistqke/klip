@@ -194,25 +194,76 @@ export async function createStemRecord(
   }
 }
 
+// Clone an external stem to own PDS
+async function cloneStem(agent: Agent, stemUri: string): Promise<StemRef> {
+  const { repo } = parseAtUri(stemUri)
+
+  // Already ours, no need to clone
+  if (repo === agent.assertDid) {
+    const response = await agent.com.atproto.repo.getRecord({
+      repo,
+      collection: 'app.klip.stem',
+      rkey: parseAtUri(stemUri).rkey,
+    })
+    return { uri: response.data.uri, cid: response.data.cid ?? '' }
+  }
+
+  // Fetch the blob and create a new stem on our PDS
+  const blob = await getStemBlob(agent, stemUri)
+
+  // Get duration from original stem record
+  const { rkey } = parseAtUri(stemUri)
+  const stemResponse = await agent.com.atproto.repo.getRecord({
+    repo,
+    collection: 'app.klip.stem',
+    rkey,
+  })
+  const duration = (stemResponse.data.value as { duration: number }).duration
+
+  return createStemRecord(agent, blob, duration)
+}
+
 export async function publishProject(
   agent: Agent,
   project: Project,
   clipBlobs: Map<string, { blob: Blob; duration: number }>
 ): Promise<RecordRef> {
-  // Upload stems for clips that have local blobs
+  const myDid = agent.assertDid
   const stemRefs = new Map<string, StemRef>()
 
-  for (const [clipId, { blob, duration }] of clipBlobs) {
-    const stemRecord = await createStemRecord(agent, blob, duration)
-    stemRefs.set(clipId, {
-      uri: stemRecord.uri,
-      cid: stemRecord.cid,
-    })
-  }
+  // Collect all clips that need stem processing
+  const allClips = project.tracks.flatMap((track) =>
+    track.clips.map((clip) => ({ trackId: track.id, clip }))
+  )
 
-  // Build tracks - stem is now on each clip
+  // Process stems in parallel
+  await Promise.all(
+    allClips.map(async ({ clip }) => {
+      // Case 1: New local recording - create stem
+      const localBlob = clipBlobs.get(clip.id)
+      if (localBlob) {
+        const stemRecord = await createStemRecord(agent, localBlob.blob, localBlob.duration)
+        stemRefs.set(clip.id, stemRecord)
+        return
+      }
+
+      // Case 2: Existing stem
+      if (clip.stem) {
+        const { repo } = parseAtUri(clip.stem.uri)
+        if (repo === myDid) {
+          // Own stem - keep as is
+          stemRefs.set(clip.id, clip.stem)
+        } else {
+          // External stem - clone to own PDS
+          const cloned = await cloneStem(agent, clip.stem.uri)
+          stemRefs.set(clip.id, cloned)
+        }
+      }
+    })
+  )
+
+  // Build tracks - only include clips with stems
   const tracks = project.tracks
-    .filter((track) => track.clips.some((clip) => stemRefs.has(clip.id)))
     .map((track) => ({
       id: track.id,
       clips: track.clips
@@ -225,6 +276,7 @@ export async function publishProject(
         })),
       audioPipeline: track.audioPipeline,
     }))
+    .filter((track) => track.clips.length > 0)
 
   // Build project record
   const record = {
@@ -261,4 +313,66 @@ export async function publishProject(
     uri: response.data.uri,
     cid: response.data.cid,
   }
+}
+
+export async function deleteProject(agent: Agent, uri: string): Promise<void> {
+  const { repo, rkey } = parseAtUri(uri)
+  // Note: Stems are not deleted - they may be referenced by other projects
+  // Use deleteOrphanedStems() for cleanup
+  await agent.com.atproto.repo.deleteRecord({
+    repo,
+    collection: 'app.klip.project',
+    rkey,
+  })
+}
+
+export async function deleteStem(agent: Agent, uri: string): Promise<void> {
+  const { repo, rkey } = parseAtUri(uri)
+  await agent.com.atproto.repo.deleteRecord({
+    repo,
+    collection: 'app.klip.stem',
+    rkey,
+  })
+}
+
+export async function listStems(agent: Agent): Promise<string[]> {
+  const response = await agent.com.atproto.repo.listRecords({
+    repo: agent.assertDid,
+    collection: 'app.klip.stem',
+    limit: 100,
+  })
+  return response.data.records.map((record) => record.uri)
+}
+
+export async function deleteOrphanedStems(agent: Agent): Promise<string[]> {
+  // Get all stems and projects
+  const [stemUris, projects] = await Promise.all([
+    listStems(agent),
+    listProjects(agent),
+  ])
+
+  // Collect all stem URIs referenced by projects
+  const referencedStems = new Set<string>()
+  for (const projectItem of projects) {
+    try {
+      const project = await getProject(agent, projectItem.uri)
+      for (const track of project.value.tracks) {
+        for (const clip of track.clips) {
+          if (clip.stem) {
+            referencedStems.add(clip.stem.uri)
+          }
+        }
+      }
+    } catch {
+      // Skip projects that can't be fetched
+    }
+  }
+
+  // Find orphaned stems (not referenced by any project)
+  const orphanedStems = stemUris.filter((uri) => !referencedStems.has(uri))
+
+  // Delete orphaned stems in parallel
+  await Promise.all(orphanedStems.map((uri) => deleteStem(agent, uri)))
+
+  return orphanedStems
 }
