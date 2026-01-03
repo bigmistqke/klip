@@ -48,11 +48,11 @@ export const Editor: Component<EditorProps> = props => {
   return (
     <div class={styles.container}>
       {/* Pre-render progress bar */}
-      <Show when={editor.player()?.isPreRendering}>
+      <Show when={editor.isPreRendering()}>
         <div class={styles.preRenderProgress}>
           <div
             class={styles.preRenderProgressBar}
-            style={{ width: `${(editor.player()?.preRenderProgress ?? 0) * 100}%` }}
+            style={{ width: `${editor.preRenderProgress() * 100}%` }}
           />
         </div>
       </Show>

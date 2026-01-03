@@ -50,6 +50,8 @@ export function createEditor(options: CreateEditorOptions) {
   const [previewPending, setPreviewPending] = createSignal(false)
   const [stopRecordingPending, setStopRecordingPending] = createSignal(false)
   const [loopEnabled, setLoopEnabled] = createSignal(false)
+  const [isPreRendering, setIsPreRendering] = createSignal(false)
+  const [preRenderProgress, setPreRenderProgress] = createSignal(0)
 
   const isSelectedTrack = createSelector(selectedTrackIndex)
 
@@ -250,11 +252,23 @@ export function createEditor(options: CreateEditorOptions) {
         log('stopRecording: scheduling pre-render')
         setTimeout(async () => {
           log('stopRecording: starting pre-render')
+          setIsPreRendering(true)
+          setPreRenderProgress(0)
+
+          // Poll progress during pre-render
+          const progressInterval = setInterval(() => {
+            setPreRenderProgress(p.preRenderProgress)
+          }, 100)
+
           try {
             await p.preRender()
             log('stopRecording: pre-render complete')
           } catch (err) {
             log('stopRecording: pre-render failed', { error: err })
+          } finally {
+            clearInterval(progressInterval)
+            setIsPreRendering(false)
+            setPreRenderProgress(0)
           }
         }, 500) // Give time for clip to load
       }
@@ -281,6 +295,8 @@ export function createEditor(options: CreateEditorOptions) {
     previewPending,
     stopRecordingPending,
     loopEnabled,
+    isPreRendering,
+    preRenderProgress,
 
     // Actions
     async stop() {
