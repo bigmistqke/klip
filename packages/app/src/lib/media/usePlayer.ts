@@ -3,7 +3,7 @@
  */
 
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
-import { createDemuxer, type Demuxer, createPlayer, type Player, type PlayerState } from '@klip/media'
+import { createDemuxer, type Demuxer, createPlayer, type Player, type PlayerState } from '@klip/codecs'
 
 export interface UsePlayerOptions {
   /** Called when a new frame is available */

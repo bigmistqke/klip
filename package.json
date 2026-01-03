@@ -9,8 +9,8 @@
     "preview": "pnpm --filter @klip/app preview",
     "test": "pnpm -r test",
     "test:run": "pnpm -r test:run",
-    "test:browser": "pnpm --filter @klip/media test:browser",
-    "test:browser:run": "pnpm --filter @klip/media test:browser:run"
+    "test:browser": "pnpm --filter @klip/codecs test:browser",
+    "test:browser:run": "pnpm --filter @klip/codecs test:browser:run"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

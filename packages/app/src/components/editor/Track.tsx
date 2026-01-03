@@ -12,7 +12,7 @@ import {
 import { type AudioPipeline, createAudioPipeline } from "~/lib/audio/pipeline";
 import type { AudioEffect } from "@klip/lexicons";
 import { usePlayer } from "~/lib/media/usePlayer";
-import type { Player } from "@klip/media";
+import type { Player } from "@klip/codecs";
 import { useProject } from "~/lib/project/context";
 import styles from "./Track.module.css";
 

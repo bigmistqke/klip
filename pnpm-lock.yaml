@@ -26,12 +26,12 @@ importers:
       '@bigmistqke/worker-proxy':
         specifier: ^0.0.13
         version: 0.0.13
+      '@klip/codecs':
+        specifier: workspace:*
+        version: link:../codecs
       '@klip/lexicons':
         specifier: workspace:*
         version: link:../lexicons
-      '@klip/media':
-        specifier: workspace:*
-        version: link:../media
       '@solidjs/router':
         specifier: ^0.15.0
         version: 0.15.4(solid-js@1.9.10)
@@ -61,23 +61,7 @@ importers:
         specifier: ^2.11.0
         version: 2.11.10(solid-js@1.9.10)(vite@6.4.1(@types/node@22.19.3))
 
-  packages/lexicons:
-    dependencies:
-      '@atproto/lexicon':
-        specifier: ^0.6.0
-        version: 0.6.0
-      '@bigmistqke/lexicon-to-valibot':
-        specifier: ^0.1.6
-        version: 0.1.6(valibot@1.2.0(typescript@5.9.3))
-      valibot:
-        specifier: ^1.2.0
-        version: 1.2.0(typescript@5.9.3)
-    devDependencies:
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
-  packages/media:
+  packages/codecs:
     dependencies:
       mediabunny:
         specifier: ^1.27.3
@@ -98,6 +82,22 @@ importers:
       vitest:
         specifier: ^4.0.16
         version: 4.0.16(@types/node@22.19.3)(@vitest/browser-playwright@4.0.16)
+
+  packages/lexicons:
+    dependencies:
+      '@atproto/lexicon':
+        specifier: ^0.6.0
+        version: 0.6.0
+      '@bigmistqke/lexicon-to-valibot':
+        specifier: ^0.1.6
+        version: 0.1.6(valibot@1.2.0(typescript@5.9.3))
+      valibot:
+        specifier: ^1.2.0
+        version: 1.2.0(typescript@5.9.3)
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
 packages:
 

@@ -25,8 +25,8 @@ import { createRecorder, requestMediaAccess } from "~/lib/audio/recorder";
 import { ProjectContext } from "~/lib/project/context";
 import { createProjectStore } from "~/lib/project/store";
 import { type Compositor, createCompositor } from "~/lib/video/compositor";
-import type { Player } from "@klip/media";
-import { createPlayerCompositor, type PlayerCompositor } from "@klip/media";
+import type { Player } from "@klip/codecs";
+import { createPlayerCompositor, type PlayerCompositor } from "@klip/codecs";
 import styles from "./Editor.module.css";
 import { Track } from "./Track";
 
