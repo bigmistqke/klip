@@ -220,21 +220,36 @@ const methods: CompositorWorkerMethods = {
     gl.clearColor(0.1, 0.1, 0.1, 1.0)
     gl.clear(gl.COLOR_BUFFER_BIT)
 
-    // Draw each track as a separate quad
+    // First pass: draw playback frames (background layer)
     for (let i = 0; i < 4; i++) {
-      const frame = playbackFrames[i] || previewFrames[i]
+      const frame = playbackFrames[i]
       if (!frame) continue
 
-      // Upload texture
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, textures[i])
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame)
 
-      // Set viewport for this cell
       const vp = getCellViewport(i, gridCols, gridRows, canvas.width, canvas.height)
       gl.viewport(vp.x, vp.y, vp.width, vp.height)
 
-      // Set uniforms and draw
+      view.uniforms.u_video.set(0)
+      view.attributes.a_quad.bind()
+      gl.drawArrays(gl.TRIANGLES, 0, 6)
+    }
+
+    // Second pass: draw preview frames on top (overlay layer)
+    for (let i = 0; i < 4; i++) {
+      const frame = previewFrames[i]
+      if (!frame) continue
+
+      gl.activeTexture(gl.TEXTURE0)
+      gl.bindTexture(gl.TEXTURE_2D, textures[i])
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame)
+
+      // Preview always uses 2x2 grid positioning
+      const vp = getCellViewport(i, 2, 2, canvas.width, canvas.height)
+      gl.viewport(vp.x, vp.y, vp.width, vp.height)
+
       view.uniforms.u_video.set(0)
       view.attributes.a_quad.bind()
       gl.drawArrays(gl.TRIANGLES, 0, 6)

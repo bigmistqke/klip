@@ -204,8 +204,8 @@ export async function createPlayer(width: number, height: number): Promise<Playe
     // Check if any preview is active (recording mode)
     const hasActivePreview = previewActive.some(active => active)
 
-    // Use pre-rendered video if available and no preview active (1x1 grid mode)
-    if (preRenderedPlayback && !hasActivePreview) {
+    // Use pre-rendered video if available (1x1 grid as background)
+    if (preRenderedPlayback) {
       perf.start('getPreRenderFrame')
 
       // Trigger buffering when playing
@@ -228,15 +228,10 @@ export async function createPlayer(width: number, height: number): Promise<Playe
       }
 
       perf.end('getPreRenderFrame')
+      // Preview streams are handled separately by the compositor (overlay on top)
     } else {
-      // Use 2x2 grid mode with individual track playbacks
+      // No pre-render: use 2x2 grid mode with individual track playbacks
       compositor.setGrid(2, 2)
-
-      // Clear pre-render frame from slot 0 if it was left over
-      if (lastPreRenderTimestamp !== null) {
-        compositor.setFrame(0, null)
-        lastPreRenderTimestamp = null
-      }
 
       // Update compositor with frames from all playbacks
       perf.start('getFrames')
