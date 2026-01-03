@@ -50,6 +50,7 @@ export function createEditor(options: CreateEditorOptions) {
   const [masterVolume, setMasterVolume] = createSignal(1)
   const [previewPending, setPreviewPending] = createSignal(false)
   const [stopRecordingPending, setStopRecordingPending] = createSignal(false)
+  const [loopEnabled, setLoopEnabled] = createSignal(false)
 
   const isSelectedTrack = createSelector(selectedTrackIndex)
 
@@ -260,6 +261,7 @@ export function createEditor(options: CreateEditorOptions) {
     isSelectedTrack,
     previewPending,
     stopRecordingPending,
+    loopEnabled,
 
     // Actions
     async stop() {
@@ -411,6 +413,18 @@ export function createEditor(options: CreateEditorOptions) {
       } finally {
         setIsPublishing(false)
       }
+    },
+
+    toggleLoop() {
+      setLoopEnabled(loop => {
+        const newValue = !loop
+        const _player = player()
+        if (_player) {
+          _player.loop = newValue
+        }
+        log('toggleLoop', { loop: newValue })
+        return newValue
+      })
     },
 
     hasAnyRecording() {

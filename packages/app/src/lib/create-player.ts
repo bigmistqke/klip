@@ -56,6 +56,12 @@ export interface Player {
   /** Current playback time */
   readonly currentTime: number
 
+  /** Whether loop is enabled */
+  loop: boolean
+
+  /** Get max duration across all loaded clips */
+  readonly maxDuration: number
+
   /** Log performance summary to console */
   logPerf(): void
 
@@ -98,6 +104,7 @@ export async function createPlayer(width: number, height: number): Promise<Playe
   let clockTime = 0
   let clockStartTime = 0 // performance.now() when playback started
   let clockStartPosition = 0 // clockTime when playback started
+  let loop = false
 
   // Track last sent frame timestamp per track to avoid redundant transfers
   // With LRU cache, getFrame() returns clones - we compare by timestamp
@@ -115,12 +122,49 @@ export async function createPlayer(width: number, height: number): Promise<Playe
   }
 
   /**
+   * Get max duration across all loaded clips
+   */
+  function getMaxDuration(): number {
+    let max = 0
+    for (const slot of slots) {
+      if (slot.playback) {
+        max = Math.max(max, slot.playback.duration)
+      }
+    }
+    return max
+  }
+
+  /**
    * Single render loop - drives everything
    */
   function renderLoop() {
     perf.start('renderLoop')
 
-    const time = getCurrentClockTime()
+    let time = getCurrentClockTime()
+
+    // Check for loop
+    if (isPlaying && loop) {
+      const maxDuration = getMaxDuration()
+      if (maxDuration > 0 && time >= maxDuration) {
+        // Loop back to start
+        log('loop: restarting from 0')
+        clockStartPosition = 0
+        clockStartTime = performance.now()
+        time = 0
+
+        // Reset frame tracking
+        for (let i = 0; i < NUM_TRACKS; i++) {
+          lastSentTimestamp[i] = null
+        }
+
+        // Reset all playbacks for loop
+        for (const slot of slots) {
+          if (slot.playback) {
+            slot.playback.resetForLoop(0)
+          }
+        }
+      }
+    }
 
     // Update compositor with frames from all playbacks
     perf.start('getFrames')
@@ -205,6 +249,18 @@ export async function createPlayer(width: number, height: number): Promise<Playe
 
     get currentTime() {
       return getCurrentClockTime()
+    },
+
+    get loop() {
+      return loop
+    },
+
+    set loop(value: boolean) {
+      loop = value
+    },
+
+    get maxDuration() {
+      return getMaxDuration()
     },
 
     getSlot(trackIndex: number): TrackSlot {

@@ -1,4 +1,4 @@
-import { FiCircle, FiPause, FiPlay, FiSquare, FiUpload, FiVolume2 } from 'solid-icons/fi'
+import { FiCircle, FiPause, FiPlay, FiRepeat, FiSquare, FiUpload, FiVolume2 } from 'solid-icons/fi'
 import { type Component, For, Show } from 'solid-js'
 import { useAuth } from '~/lib/atproto/auth-context'
 import { createEditor } from '~/lib/create-editor'
@@ -59,7 +59,7 @@ export const Editor: Component<EditorProps> = props => {
           onClick={editor.playPause}
           disabled={editor.isRecording() || editor.selectedTrack() !== null}
         >
-          {editor.player()?.isPlaying ? <FiPause size={24} /> : <FiPlay size={24} />}
+          {editor.player()?.isPlaying ? <FiPause size={20} /> : <FiPlay size={20} />}
         </button>
         <button
           type="button"
@@ -82,6 +82,16 @@ export const Editor: Component<EditorProps> = props => {
           disabled={editor.isRecording() || editor.selectedTrack() !== null}
         >
           <FiSquare size={20} />
+        </button>
+        <button
+          type="button"
+          class={styles.loopButton}
+          classList={{ [styles.active]: editor.loopEnabled() }}
+          onClick={editor.toggleLoop}
+          disabled={editor.isRecording()}
+          title={editor.loopEnabled() ? 'Disable loop' : 'Enable loop'}
+        >
+          <FiRepeat size={20} />
         </button>
         <label class={styles.masterVolume}>
           <FiVolume2 size={16} />

@@ -20,7 +20,7 @@
 
 .transport {
   display: grid;
-  grid-template-columns: auto auto auto auto auto;
+  grid-template-columns: auto auto auto auto auto auto;
   justify-content: center;
   align-items: center;
   gap: 12px;
@@ -56,8 +56,8 @@
 .recordButton {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   background: #e53935;
   color: white;
   border: none;
@@ -92,8 +92,8 @@
 .playButton {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   background: #3b82f6;
   color: white;
   border: none;
@@ -127,6 +127,38 @@
 
 .stopButton:hover {
   background: #444;
+}
+
+.loopButton {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  background: #333;
+  color: #888;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.loopButton:hover {
+  background: #444;
+  color: #aaa;
+}
+
+.loopButton:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.loopButton.active {
+  background: #3b82f6;
+  color: white;
+}
+
+.loopButton.active:hover {
+  background: #2563eb;
 }
 
 .grid {

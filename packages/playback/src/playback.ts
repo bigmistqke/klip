@@ -61,6 +61,12 @@ export interface Playback {
   startAudio(startTime: number): void
 
   /**
+   * Reset playback state for looping (synchronous, no re-buffering)
+   * Resets internal timing state so tick() will work from new time
+   */
+  resetForLoop(time: number): void
+
+  /**
    * Pause playback
    */
   pause(): void
@@ -184,9 +190,11 @@ export async function createPlayback(
     }
   }
 
-  /** Get frame at specific time */
+  /** Get frame at specific time (returns null if past duration) */
   const getFrameAtTime = (time: number): VideoFrame | null => {
     if (!frameBuffer) return null
+    // Return null if past the clip's duration
+    if (duration > 0 && time >= duration) return null
     const bufferedFrame = frameBuffer.getFrame(time)
     return bufferedFrame?.frame ?? null
   }
@@ -250,6 +258,24 @@ export async function createPlayback(
         audioScheduler.play(startTime)
       }
       setState('playing')
+    },
+
+    resetForLoop(time: number): void {
+      log('resetForLoop', { time })
+      // Reset internal timing state
+      lastFramePts = -1
+      lastTickTime = time
+
+      // Reset audio scheduler for new position
+      if (audioScheduler) {
+        audioScheduler.seek(time)
+        audioScheduler.play(time)
+      }
+
+      // Trigger audio buffering from new position
+      if (audioTrack && audioDecoder && audioScheduler) {
+        bufferAudio(time, time + audioBufferAhead)
+      }
     },
 
     pause(): void {
