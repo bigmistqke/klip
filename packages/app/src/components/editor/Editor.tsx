@@ -55,11 +55,11 @@ export const Editor: Component<EditorProps> = props => {
         <button
           type="button"
           class={styles.playButton}
-          data-playing={editor.player().isPlaying}
+          data-playing={editor.player()?.isPlaying ?? false}
           onClick={editor.playPause}
           disabled={editor.isRecording() || editor.selectedTrack() !== null}
         >
-          {editor.player().isPlaying ? <FiPause size={24} /> : <FiPlay size={24} />}
+          {editor.player()?.isPlaying ? <FiPause size={24} /> : <FiPlay size={24} />}
         </button>
         <button
           type="button"
@@ -100,7 +100,7 @@ export const Editor: Component<EditorProps> = props => {
           onClick={editor.publish}
           disabled={
             editor.isRecording() ||
-            editor.player().isPlaying ||
+            (editor.player()?.isPlaying ?? false) ||
             editor.isPublishing() ||
             !editor.hasAnyRecording() ||
             !agent()
@@ -115,8 +115,8 @@ export const Editor: Component<EditorProps> = props => {
           {id => (
             <Track
               id={id}
-              hasClip={editor.player().hasClip(id)}
-              isPlaying={editor.player().isPlaying}
+              hasClip={editor.player()?.hasClip(id) ?? false}
+              isPlaying={editor.player()?.isPlaying ?? false}
               isSelected={editor.selectedTrack() === id}
               isRecording={editor.isRecording() && editor.selectedTrack() === id}
               isLoading={editor.previewPending() && editor.selectedTrack() === id}

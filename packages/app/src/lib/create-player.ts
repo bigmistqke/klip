@@ -1,9 +1,8 @@
 import type { Demuxer } from '@eddy/codecs'
-import { createCompositor, type VideoSource } from '@eddy/compositor'
 import { createAudioPipeline, type AudioPipeline } from '@eddy/mixer'
 import { createPlayback, type Playback } from '@eddy/playback'
 import { debug } from '@eddy/utils'
-import { createDemuxerWorker } from '~/workers'
+import { createCompositorWorkerWrapper, createDemuxerWorker } from '~/workers'
 
 const log = debug('player', true)
 
@@ -29,8 +28,8 @@ export interface Player {
   /** Clear a clip from a track */
   clearClip(trackIndex: number): void
 
-  /** Set a video source for a track (for camera preview) */
-  setPreviewSource(trackIndex: number, source: VideoSource | null): void
+  /** Set a preview stream for a track (for camera preview) */
+  setPreviewSource(trackIndex: number, stream: MediaStream | null): void
 
   /** Start playback from time (affects all tracks with clips) */
   play(time?: number): Promise<void>
@@ -66,8 +65,11 @@ const NUM_TRACKS = 4
  * Create a player that manages compositor, playbacks, and audio pipelines
  * Owns the single render loop and master clock
  */
-export function createPlayer(width: number, height: number): Player {
-  const compositor = createCompositor(width, height)
+export async function createPlayer(width: number, height: number): Promise<Player> {
+  log('createPlayer', { width, height })
+
+  // Create compositor in worker
+  const compositor = await createCompositorWorkerWrapper(width, height)
 
   // Create slots with audio pipelines (pipelines are created once, playbacks are per-clip)
   const slots: TrackSlot[] = Array.from({ length: NUM_TRACKS }, () => ({
@@ -108,7 +110,13 @@ export function createPlayer(width: number, height: number): Player {
       if (playback) {
         // Use tick() when playing, getFrameAt() when static
         const frame = isPlaying ? playback.tick(time) : playback.getFrameAt(time)
-        compositor.setFrame(i, frame)
+        if (frame) {
+          // Clone frame before transferring (transfer moves ownership to worker)
+          const clonedFrame = frame.clone()
+          compositor.setFrame(i, clonedFrame)
+        } else {
+          compositor.setFrame(i, null)
+        }
       }
     }
 
@@ -206,8 +214,8 @@ export function createPlayer(width: number, height: number): Player {
       compositor.setFrame(trackIndex, null)
     },
 
-    setPreviewSource(trackIndex: number, source: VideoSource | null): void {
-      compositor.setSource(trackIndex, source)
+    setPreviewSource(trackIndex: number, stream: MediaStream | null): void {
+      compositor.setPreviewStream(trackIndex, stream)
     },
 
     async play(time?: number): Promise<void> {

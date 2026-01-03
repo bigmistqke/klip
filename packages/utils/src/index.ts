@@ -1,3 +1,5 @@
+const ENABLED = false
+
 /**
  * Create a debug logger that can be toggled on/off
  *
@@ -7,7 +9,7 @@
  */
 export function debug(title: string, enabled: boolean) {
   return (...args: unknown[]) => {
-    if (enabled) {
+    if (ENABLED && enabled) {
       console.log(`[${title}]`, ...args)
     }
   }

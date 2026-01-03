@@ -81,7 +81,10 @@ export interface CompositorWorkerMethods {
   /** Initialize with OffscreenCanvas */
   init(canvas: OffscreenCanvas, width: number, height: number): Promise<void>
 
-  /** Set frame for a track slot */
+  /** Set a preview stream for a track slot (continuously reads latest frame) */
+  setPreviewStream(index: number, stream: ReadableStream<VideoFrame> | null): void
+
+  /** Set a playback frame for a track slot (for time-synced playback) */
   setFrame(index: number, frame: VideoFrame | null): void
 
   /** Render current state */

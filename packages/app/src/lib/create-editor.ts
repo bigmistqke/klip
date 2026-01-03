@@ -3,7 +3,6 @@ import { getMasterMixer, resumeAudioContext } from '@eddy/mixer'
 import { debug } from '@eddy/utils'
 import {
   createEffect,
-  createMemo,
   createSelector,
   createSignal,
   onCleanup,
@@ -54,42 +53,47 @@ export function createEditor(options: CreateEditorOptions) {
 
   const isSelectedTrack = createSelector(selectedTrackIndex)
 
-  // Create player
-  const player = createMemo(() => {
-    const p = createPlayer(project.store.project.canvas.width, project.store.project.canvas.height)
+  // Player signal - set after async initialization
+  const [player, setPlayer] = createSignal<Player | null>(null)
 
-    options.container.appendChild(p.canvas)
+  // Create player asynchronously
+  createEffect(() => {
+    const width = project.store.project.canvas.width
+    const height = project.store.project.canvas.height
 
-    // Expose debug info for E2E tests
-    window.__KLIP_DEBUG__ = {
-      player: p,
-      getPlaybackStates: () => {
-        const states = []
-        for (let i = 0; i < 4; i++) {
-          const slot = p.getSlot(i)
-          if (slot.playback) {
-            states.push({
-              trackIndex: i,
-              state: slot.playback.state,
-              currentTime: p.currentTime,
-              hasFrame: slot.playback.getFrameAt(p.currentTime) !== null,
-            })
+    createPlayer(width, height).then(p => {
+      options.container.appendChild(p.canvas)
+
+      // Expose debug info for E2E tests
+      window.__KLIP_DEBUG__ = {
+        player: p,
+        getPlaybackStates: () => {
+          const states = []
+          for (let i = 0; i < 4; i++) {
+            const slot = p.getSlot(i)
+            if (slot.playback) {
+              states.push({
+                trackIndex: i,
+                state: slot.playback.state,
+                currentTime: p.currentTime,
+                hasFrame: slot.playback.getFrameAt(p.currentTime) !== null,
+              })
+            }
           }
-        }
-        return states
-      },
-    }
+          return states
+        },
+      }
 
-    onCleanup(() => {
-      p.destroy()
-      stopPreview()
-      delete window.__KLIP_DEBUG__
+      setPlayer(p)
+
+      onCleanup(() => {
+        p.destroy()
+        stopPreview()
+        delete window.__KLIP_DEBUG__
+      })
     })
-
-    return p
   })
 
-  let previewVideo: HTMLVideoElement | null = null
   let stream: MediaStream | null = null
   let recorder: WorkerRecorder | null = null
 
@@ -107,6 +111,8 @@ export function createEditor(options: CreateEditorOptions) {
   // Load clips into player when project store changes
   createEffect(() => {
     const p = player()
+    if (!p) return
+
     const tracks = project.store.project.tracks
     log('effect: checking clips to load', { numTracks: tracks.length })
 
@@ -135,6 +141,8 @@ export function createEditor(options: CreateEditorOptions) {
   // Initialize volume/pan from project store
   createEffect(() => {
     const p = player()
+    if (!p) return
+
     const tracks = project.store.project.tracks
 
     for (let i = 0; i < 4; i++) {
@@ -157,12 +165,8 @@ export function createEditor(options: CreateEditorOptions) {
 
   function setupPreviewStream(mediaStream: MediaStream, trackIndex: number) {
     stream = mediaStream
-    previewVideo = document.createElement('video')
-    previewVideo.srcObject = stream
-    previewVideo.muted = true
-    previewVideo.playsInline = true
-    previewVideo.play()
-    player().setPreviewSource(trackIndex, previewVideo)
+    // Pass MediaStream directly to compositor worker
+    player()?.setPreviewSource(trackIndex, stream)
   }
 
   async function startPreview(trackIndex: number) {
@@ -181,11 +185,7 @@ export function createEditor(options: CreateEditorOptions) {
   function stopPreview() {
     const track = selectedTrackIndex()
     if (track !== null) {
-      player().setPreviewSource(track, null)
-    }
-    if (previewVideo) {
-      previewVideo.srcObject = null
-      previewVideo = null
+      player()?.setPreviewSource(track, null)
     }
     stream?.getTracks().forEach(t => t.stop())
     stream = null
@@ -193,6 +193,9 @@ export function createEditor(options: CreateEditorOptions) {
 
   async function startRecording() {
     log('startRecording')
+    const p = player()
+    if (!p) return
+
     // Start recording
     if (!stream) {
       throw new Error('Cannot start recording without media stream')
@@ -205,12 +208,13 @@ export function createEditor(options: CreateEditorOptions) {
 
     // Start playback from 0 (plays all existing clips in sync)
     log('startRecording: calling player.play(0)')
-    await player().play(0)
+    await p.play(0)
     log('startRecording complete')
   }
 
   async function stopRecording(track: number) {
     log('stopRecording', { track })
+    const p = player()
     if (!recorder) {
       throw new Error('Recording state but no recorder instance')
     }
@@ -234,7 +238,7 @@ export function createEditor(options: CreateEditorOptions) {
 
       // Stop playback and show first frames of all clips
       log('stopRecording: calling player.stop()')
-      await player().stop()
+      await p?.stop()
       log('stopRecording complete')
     } finally {
       setStopRecordingPending(false)
@@ -260,11 +264,13 @@ export function createEditor(options: CreateEditorOptions) {
     // Actions
     async stop() {
       log('stop (editor)')
-      await player().stop()
+      await player()?.stop()
     },
 
     async selectTrack(trackIndex: number) {
       log('selectTrack', { trackIndex, currentlySelected: selectedTrackIndex() })
+      const p = player()
+
       // If already selected, deselect
       if (isSelectedTrack(trackIndex)) {
         log('selectTrack: deselecting')
@@ -283,12 +289,12 @@ export function createEditor(options: CreateEditorOptions) {
       stopPreview()
 
       // Start preview for new track (only if no recording exists)
-      if (!player().hasClip(trackIndex)) {
+      if (p && !p.hasClip(trackIndex)) {
         log('selectTrack: starting preview', { trackIndex })
         setSelectedTrack(trackIndex)
         await startPreview(trackIndex)
       } else {
-        log('selectTrack: blocked - track has clip', { trackIndex })
+        log('selectTrack: blocked - track has clip or player not ready', { trackIndex })
       }
     },
 
@@ -315,7 +321,10 @@ export function createEditor(options: CreateEditorOptions) {
     },
 
     async playPause() {
-      log('playPause', { isPlaying: player().isPlaying, selectedTrack: selectedTrackIndex() })
+      const p = player()
+      log('playPause', { isPlaying: p?.isPlaying, selectedTrack: selectedTrackIndex() })
+      if (!p) return
+
       // Stop preview when playing
       if (selectedTrackIndex() !== null && !isRecording()) {
         log('playPause: stopping preview')
@@ -325,18 +334,18 @@ export function createEditor(options: CreateEditorOptions) {
 
       await resumeAudioContext()
 
-      if (player().isPlaying) {
+      if (p.isPlaying) {
         log('playPause: pausing')
-        player().pause()
+        p.pause()
       } else {
         log('playPause: playing')
-        await player().play()
+        await p.play()
       }
     },
 
     clearRecording(index: number) {
       project.clearTrack(index)
-      player().clearClip(index)
+      player()?.clearClip(index)
     },
 
     setTrackVolume(index: number, value: number) {
@@ -347,7 +356,7 @@ export function createEditor(options: CreateEditorOptions) {
       if (gainIndex !== -1) {
         project.setEffectValue(trackId, gainIndex, value)
       }
-      player().setVolume(index, value)
+      player()?.setVolume(index, value)
     },
 
     setTrackPan(index: number, value: number) {
@@ -358,7 +367,7 @@ export function createEditor(options: CreateEditorOptions) {
       if (panIndex !== -1) {
         project.setEffectValue(trackId, panIndex, (value + 1) / 2)
       }
-      player().setPan(index, value)
+      player()?.setPan(index, value)
     },
 
     updateMasterVolume(value: number) {
@@ -406,6 +415,7 @@ export function createEditor(options: CreateEditorOptions) {
 
     hasAnyRecording() {
       const p = player()
+      if (!p) return false
       for (let i = 0; i < 4; i++) {
         if (p.hasClip(i)) return true
       }

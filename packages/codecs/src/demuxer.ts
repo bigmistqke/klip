@@ -1,13 +1,13 @@
+import { debug } from '@eddy/utils'
 import {
-  Input,
+  ALL_FORMATS,
   BlobSource,
   EncodedPacketSink,
-  ALL_FORMATS,
-  type InputVideoTrack,
-  type InputAudioTrack,
+  Input,
   type EncodedPacket,
+  type InputAudioTrack,
+  type InputVideoTrack,
 } from 'mediabunny'
-import { debug } from '@eddy/utils'
 
 const log = debug('demuxer', true)
 

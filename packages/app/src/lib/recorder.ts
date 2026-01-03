@@ -1,5 +1,5 @@
-import { ALL_FORMATS, EncodedPacketSink, Input, ReadableStreamSource } from 'mediabunny'
 import { debug } from '@eddy/utils'
+import { ALL_FORMATS, EncodedPacketSink, Input, ReadableStreamSource } from 'mediabunny'
 
 const log = debug('recorder', true)
 

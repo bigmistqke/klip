@@ -1,5 +1,5 @@
 import { debug } from '@eddy/utils'
-import type { DemuxedSample, AudioTrackInfo, Demuxer } from './demuxer'
+import type { AudioTrackInfo, DemuxedSample, Demuxer } from './demuxer'
 
 const log = debug('audio-decoder', true)
 

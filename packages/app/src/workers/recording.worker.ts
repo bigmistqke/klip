@@ -8,15 +8,15 @@
 
 import { expose, transfer } from '@bigmistqke/rpc/messenger'
 import {
-  Output,
-  BufferTarget,
-  VideoSampleSource,
-  AudioSampleSource,
-  VideoSample,
   AudioSample,
+  AudioSampleSource,
+  BufferTarget,
+  Output,
+  VideoSample,
+  VideoSampleSource,
   WebMOutputFormat,
 } from 'mediabunny'
-import type { RecordingWorkerMethods, RecordingStartConfig } from './types'
+import type { RecordingStartConfig, RecordingWorkerMethods } from './types'
 
 import { debug } from '@eddy/utils'
 
