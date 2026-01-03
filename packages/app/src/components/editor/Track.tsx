@@ -12,8 +12,8 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { usePlayback } from "~/lib/player/usePlayer";
-import { useProject } from "~/lib/project-store/project-store-context";
+import { useProject } from "~/lib/project-store-context";
+import { usePlayback } from "~/lib/use-playback";
 import styles from "./Track.module.css";
 
 interface TrackProps {

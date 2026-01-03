@@ -1,7 +1,7 @@
 import type { Agent } from '@atproto/api'
 import type { AudioEffect, Project, Track } from '@klip/lexicons'
 import { createStore, produce } from 'solid-js/store'
-import { getProjectByRkey, getStemBlob } from '../atproto/records'
+import { getProjectByRkey, getStemBlob } from './atproto/crud'
 
 // Local state extensions (not persisted to PDS)
 interface LocalClipState {

@@ -3,24 +3,24 @@
  * Connects Playback instances to the WebGL compositor for rendering
  */
 
-import type { Playback } from '@klip/playback'
 import type { Compositor } from '@klip/compositor'
+import type { Playback } from '@klip/playback'
 
-export interface PlayerSlot {
+export interface PlaybackSlot {
   /** The player instance */
-  player: Playback
+  playback: Playback
   /** Track index in the compositor (0-3) */
   trackIndex: number
   /** Unsubscribe function for frame callback */
   unsubscribe: () => void
 }
 
-export interface PlayerCompositor {
+export interface PlaybackCompositor {
   /** The compositor being used */
   readonly compositor: Compositor
 
   /** Currently attached players */
-  readonly slots: ReadonlyArray<PlayerSlot | null>
+  readonly slots: ReadonlyArray<PlaybackSlot | null>
 
   /**
    * Attach a player to a compositor track
@@ -56,7 +56,7 @@ export interface PlayerCompositor {
   destroy(): void
 }
 
-export interface PlayerCompositorOptions {
+export interface PlaybackCompositorOptions {
   /** Whether to start rendering immediately (default: true) */
   autoStart?: boolean
 }
@@ -64,13 +64,13 @@ export interface PlayerCompositorOptions {
 /**
  * Create a player-compositor integration
  */
-export function createPlayerCompositor(
+export function createPlaybackCompositor(
   compositor: Compositor,
-  options: PlayerCompositorOptions = {}
-): PlayerCompositor {
+  options: PlaybackCompositorOptions = {}
+): PlaybackCompositor {
   const autoStart = options.autoStart ?? true
 
-  const slots: (PlayerSlot | null)[] = [null, null, null, null]
+  const slots: (PlaybackSlot | null)[] = [null, null, null, null]
   let animationFrameId: number | null = null
   let isRunning = false
 
@@ -81,7 +81,7 @@ export function createPlayerCompositor(
     // Update compositor with current frames from all players
     for (const slot of slots) {
       if (slot) {
-        const frame = slot.player.getCurrentFrame()
+        const frame = slot.playback.getCurrentFrame()
         compositor.setFrame(slot.trackIndex, frame)
       }
     }
@@ -93,7 +93,7 @@ export function createPlayerCompositor(
     animationFrameId = requestAnimationFrame(renderLoop)
   }
 
-  const instance: PlayerCompositor = {
+  const instance: PlaybackCompositor = {
     get compositor() {
       return compositor
     },
@@ -119,7 +119,7 @@ export function createPlayerCompositor(
       })
 
       slots[trackIndex] = {
-        player,
+        playback: player,
         trackIndex,
         unsubscribe,
       }
@@ -152,7 +152,7 @@ export function createPlayerCompositor(
       // Update all frames
       for (const slot of slots) {
         if (slot) {
-          const frame = slot.player.getCurrentFrame()
+          const frame = slot.playback.getCurrentFrame()
           compositor.setFrame(slot.trackIndex, frame)
         }
       }

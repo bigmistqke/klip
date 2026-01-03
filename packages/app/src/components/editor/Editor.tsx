@@ -1,8 +1,5 @@
 import { type Compositor, createCompositor } from "@klip/compositor";
-import {
-  createPlayerCompositor,
-  type PlayerCompositor,
-} from "~/lib/player-compositor/player-compositor";
+import { getMasterMixer, resumeAudioContext } from "@klip/mixer";
 import type { Playback } from "@klip/playback";
 import { action, useAction, useNavigate, useSubmission } from "@solidjs/router";
 import {
@@ -23,12 +20,15 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { getMasterMixer, resumeAudioContext } from "@klip/mixer";
 import { useAuth } from "~/lib/atproto/auth-context";
-import { publishProject } from "~/lib/atproto/records";
-import { createProjectStore } from "~/lib/project-store/project-store";
-import { StoreContext } from "~/lib/project-store/project-store-context";
-import { createRecorder, requestMediaAccess } from "~/lib/recorder/recorder";
+import { publishProject } from "~/lib/atproto/crud";
+import {
+  createPlaybackCompositor,
+  type PlaybackCompositor,
+} from "~/lib/playback-compositor";
+import { createProjectStore } from "~/lib/project-store";
+import { StoreContext } from "~/lib/project-store-context";
+import { createRecorder, requestMediaAccess } from "~/lib/recorder";
 import styles from "./Editor.module.css";
 import { Track } from "./Track";
 
@@ -83,7 +83,7 @@ export const Editor: Component<EditorProps> = (props) => {
 
   let compositorContainer: HTMLDivElement | undefined;
   let compositor: Compositor | null = null;
-  let playerCompositor: PlayerCompositor | null = null;
+  let playerCompositor: PlaybackCompositor | null = null;
   let previewVideo: HTMLVideoElement | null = null;
   let stream: MediaStream | null = null;
   let recorder: ReturnType<typeof createRecorder> | null = null;
@@ -100,7 +100,9 @@ export const Editor: Component<EditorProps> = (props) => {
       compositorContainer.appendChild(compositor.canvas);
     }
     // Create player compositor for WebCodecs-based playback
-    playerCompositor = createPlayerCompositor(compositor, { autoStart: true });
+    playerCompositor = createPlaybackCompositor(compositor, {
+      autoStart: true,
+    });
   });
 
   onCleanup(() => {

@@ -12,7 +12,7 @@ import {
   deleteOrphanedStems,
   deleteProject,
   listProjects,
-} from "~/lib/atproto/records";
+} from "~/lib/atproto/crud";
 import styles from "./home.module.css";
 
 export default function Home() {
