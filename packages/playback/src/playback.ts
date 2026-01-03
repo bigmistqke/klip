@@ -21,6 +21,8 @@ export interface PlaybackOptions {
   maxVideoFrames?: number
   /** Audio context to use (creates one if not provided) */
   audioContext?: AudioContext
+  /** Destination node for audio output (defaults to audioContext.destination) */
+  audioDestination?: AudioNode
 }
 
 export interface Playback {
@@ -99,7 +101,7 @@ export interface Playback {
 export async function createPlayback(
   demuxer: Demuxer,
   options: PlaybackOptions = {}
-): Promise<Transport> {
+): Promise<Playback> {
   const videoBufferAhead = options.videoBufferAhead ?? 2
   const audioBufferAhead = options.audioBufferAhead ?? 0.5
   const maxVideoFrames = options.maxVideoFrames ?? 60
@@ -150,6 +152,7 @@ export async function createPlayback(
     audioScheduler = createAudioScheduler({
       scheduleAhead: audioBufferAhead,
       audioContext: options.audioContext,
+      destination: options.audioDestination,
     })
     audioDecoder = await createAudioDecoder(demuxer, audioTrack)
   }

@@ -22,6 +22,8 @@ export interface AudioSchedulerOptions {
   scheduleAhead?: number
   /** Audio context to use (creates one if not provided) */
   audioContext?: AudioContext
+  /** Destination node for audio output (defaults to audioContext.destination) */
+  destination?: AudioNode
 }
 
 export interface AudioScheduler {
@@ -103,7 +105,11 @@ function audioDataToBuffer(audioData: AudioData, audioContext: AudioContext): Au
  */
 export function createAudioScheduler(options: AudioSchedulerOptions = {}): AudioScheduler {
   const scheduleAhead = options.scheduleAhead ?? 0.5
-  const audioContext = options.audioContext ?? new AudioContext()
+  // Use the destination's context if available, otherwise use provided context or create new
+  const audioContext = options.destination?.context as AudioContext
+    ?? options.audioContext
+    ?? new AudioContext()
+  const destination = options.destination ?? audioContext.destination
 
   // Scheduled chunks
   let scheduledChunks: ScheduledChunk[] = []
@@ -196,7 +202,7 @@ export function createAudioScheduler(options: AudioSchedulerOptions = {}): Audio
       // Create and schedule the source
       const source = audioContext.createBufferSource()
       source.buffer = audioBuffer
-      source.connect(audioContext.destination)
+      source.connect(destination)
 
       // Schedule playback
       const startTime = Math.max(contextPlayTime, audioContext.currentTime)

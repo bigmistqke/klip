@@ -231,7 +231,9 @@ export async function createFrameBuffer(
         }
       }
 
-      return best
+      // If no frame found at or before time, return the first frame
+      // (handles seeking to t=0 when first frame has pts > 0)
+      return best ?? frames[0]
     },
 
     async seekTo(time: number): Promise<void> {
