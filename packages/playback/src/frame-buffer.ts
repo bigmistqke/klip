@@ -91,7 +91,7 @@ export async function createFrameBuffer(
   options: FrameBufferOptions = {},
 ): Promise<FrameBuffer> {
   const bufferId = frameBufferIdCounter++
-  const log = debug(`frame-buffer-${bufferId}`, false)
+  const log = debug(`frame-buffer-${bufferId}`, true)
   log('createFrameBuffer', { trackId: trackInfo.id, duration: trackInfo.duration })
 
   const bufferAhead = options.bufferAhead ?? 2
@@ -100,8 +100,24 @@ export async function createFrameBuffer(
   // Use provided cache or global singleton
   const cache = options.cache ?? getSharedFrameCache()
 
-  // Create the decoder
-  const decoder = await createVideoDecoder(demuxer, trackInfo)
+  // Create the decoder (may need to recreate if it closes unexpectedly)
+  let decoder = await createVideoDecoder(demuxer, trackInfo)
+
+  /** Recreate decoder if it was closed unexpectedly */
+  const ensureDecoderOpen = async (): Promise<boolean> => {
+    if ((decoder.decoder.state as string) !== 'closed') {
+      return true
+    }
+    log('ensureDecoderOpen: decoder closed, recreating')
+    try {
+      decoder = await createVideoDecoder(demuxer, trackInfo)
+      decoderReady = false
+      return true
+    } catch (err) {
+      log('ensureDecoderOpen: failed to recreate decoder', { error: err })
+      return false
+    }
+  }
 
   // Track which PTS values we have buffered (sorted by PTS)
   // We store { pts, duration } - the actual frames are in the shared cache
@@ -172,8 +188,11 @@ export async function createFrameBuffer(
 
     if (samples.length === 0 || destroyed) return
 
-    // Check decoder state before starting
-    if ((decoder.decoder.state as string) === 'closed') return
+    // Ensure decoder is open (recreate if closed)
+    if (!(await ensureDecoderOpen())) {
+      log('decodeAndBuffer: could not ensure decoder is open')
+      return
+    }
 
     let decodedCount = 0
     let skippedCount = 0
@@ -181,8 +200,17 @@ export async function createFrameBuffer(
     let errorCount = 0
 
     for (const sample of samples) {
-      // Check if destroyed or decoder closed during loop
-      if (destroyed || (decoder.decoder.state as string) === 'closed') return
+      // Check if destroyed during loop
+      if (destroyed) return
+
+      // Try to recover if decoder got closed during loop
+      if ((decoder.decoder.state as string) === 'closed') {
+        log('decodeAndBuffer: decoder closed mid-loop, attempting recovery')
+        if (!(await ensureDecoderOpen())) {
+          log('decodeAndBuffer: recovery failed, aborting')
+          return
+        }
+      }
 
       // Skip delta frames if decoder hasn't received a keyframe yet
       if (!decoderReady && !sample.isKeyframe) {
@@ -225,13 +253,22 @@ export async function createFrameBuffer(
       } catch (err) {
         errorCount++
         log('decodeAndBuffer error', { pts: sample.pts, isKeyframe: sample.isKeyframe, error: err })
-        if (decoder.decoder.state === 'closed') return
-        if (sample.isKeyframe) {
+
+        // If decoder closed after error, try to recover
+        if ((decoder.decoder.state as string) === 'closed') {
+          log('decodeAndBuffer: decoder closed after error, attempting recovery')
+          if (!(await ensureDecoderOpen())) {
+            log('decodeAndBuffer: recovery failed after error, aborting')
+            return
+          }
+          // After recreating decoder, we need a keyframe to continue
+          decoderReady = false
+        } else if (sample.isKeyframe) {
           decoderReady = false
         }
-        if (!sample.isKeyframe) {
-          bufferPosition = sample.pts + sample.duration
-        }
+
+        // Move past this sample
+        bufferPosition = sample.pts + sample.duration
       }
     }
 
@@ -339,8 +376,12 @@ export async function createFrameBuffer(
         // Clear local tracking (cache frames may still be used by other tracks)
         clearLocalTracking()
 
-        // Reset decoder for clean state
-        await decoder.reset()
+        // Reset decoder for clean state (or recreate if closed)
+        if ((decoder.decoder.state as string) === 'closed') {
+          await ensureDecoderOpen()
+        } else {
+          await decoder.reset()
+        }
         decoderReady = false
 
         // Find keyframe at or before the target time

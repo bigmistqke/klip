@@ -4,7 +4,7 @@ import { createPlayback, type Playback } from '@eddy/playback'
 import { debug, getGlobalPerfMonitor } from '@eddy/utils'
 import { createCompositorWorkerWrapper, createDemuxerWorker } from '~/workers'
 
-const log = debug('player', false)
+const log = debug('player', true)
 const perf = getGlobalPerfMonitor()
 
 export interface TrackSlot {

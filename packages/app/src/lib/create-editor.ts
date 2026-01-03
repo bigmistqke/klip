@@ -11,10 +11,9 @@ import {
 import { publishProject } from '~/lib/atproto/crud'
 import { createPlayer, type Player } from '~/lib/create-player'
 import { createProjectStore } from '~/lib/project-store'
-import { requestMediaAccess } from '~/lib/recorder'
-import { createRecorderWorker, type WorkerRecorder } from '~/workers'
+import { createRecorder, requestMediaAccess } from '~/lib/recorder'
 
-const log = debug('editor', false)
+const log = debug('editor', true)
 
 // Debug interface for E2E tests
 export interface EditorDebugInfo {
@@ -96,7 +95,7 @@ export function createEditor(options: CreateEditorOptions) {
   })
 
   let stream: MediaStream | null = null
-  let recorder: WorkerRecorder | null = null
+  let recorder: ReturnType<typeof createRecorder> | null = null
 
   // Load project if rkey provided
   createEffect((projectLoaded?: boolean) => {
@@ -202,7 +201,7 @@ export function createEditor(options: CreateEditorOptions) {
       throw new Error('Cannot start recording without media stream')
     }
 
-    recorder = createRecorderWorker(stream)
+    recorder = createRecorder(stream)
     recorder.start()
 
     setIsRecording(true)

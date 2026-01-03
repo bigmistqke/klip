@@ -115,7 +115,7 @@ export async function createPlayback(
   options: PlaybackOptions = {},
 ): Promise<Playback> {
   const id = String(playbackIdCounter++)
-  const log = debug(`playback-${id}`, false)
+  const log = debug(`playback-${id}`, true)
   log('creating playback')
 
   const videoBufferAhead = options.videoBufferAhead ?? 2
