@@ -1,215 +1,31 @@
-import type { AudioEffect } from "@klip/lexicons";
-import { type AudioPipeline, createAudioPipeline } from "@klip/mixer";
-import type { Playback } from "@klip/playback";
 import clsx from "clsx";
 import { FiTrash2 } from "solid-icons/fi";
-import {
-  type Component,
-  createEffect,
-  createMemo,
-  For,
-  onCleanup,
-  onMount,
-  Show,
-} from "solid-js";
-import { useProject } from "~/lib/project-store-context";
-import { usePlayback } from "~/lib/use-playback";
+import { type Component, Show } from "solid-js";
 import styles from "./Track.module.css";
 
 interface TrackProps {
   id: number;
-  isPlaying?: boolean;
-  isSelected?: boolean;
-  isRecording?: boolean;
-  isLoading?: boolean;
-  currentTime?: number;
-  onSelect?: () => void;
-  /** Called when player is ready or cleared */
-  onPlayerChange?: (index: number, player: Playback | null) => void;
-  onClear?: () => void;
+  hasClip: boolean;
+  isPlaying: boolean;
+  isSelected: boolean;
+  isRecording: boolean;
+  isLoading: boolean;
+  volume: number;
+  pan: number;
+  onSelect: () => void;
+  onVolumeChange: (value: number) => void;
+  onPanChange: (value: number) => void;
+  onClear: () => void;
 }
 
 export const Track: Component<TrackProps> = (props) => {
-  const project = useProject();
-  const trackId = `track-${props.id}`;
-
-  // WebCodecs-based player
-  const playerHook = usePlayback({
-    onFrame: (frame, time) => {
-      // Frame updates handled by PlayerCompositor in Editor
-    },
-  });
-
-  let pipeline: AudioPipeline | null = null;
-
-  // Derived state from project store
-  const hasRecording = createMemo(() => project.hasRecording(props.id));
-  const track = createMemo(() =>
-    project.store.project.tracks.find((t) => t.id === trackId),
-  );
-  const firstClip = createMemo(() => track()?.clips[0]);
-  const clipBlob = createMemo(() => {
-    const clip = firstClip();
-    return clip ? project.getClipBlob(clip.id) : undefined;
-  });
-  const audioPipeline = createMemo(() => project.getTrackPipeline(trackId));
-
-  // Helper to get effect value by index
-  const getEffectValue = (index: number) =>
-    project.getEffectValue(trackId, index);
-
-  onMount(() => {
-    pipeline = createAudioPipeline();
-    // Initialize pipeline with store values
-    const effects = audioPipeline();
-    effects.forEach((effect, i) => {
-      applyEffectToAudioPipeline(effect.type, getEffectValue(i));
-    });
-  });
-
-  // Apply effect value to the Web Audio pipeline
-  function applyEffectToAudioPipeline(effectType: string, value: number) {
-    if (!pipeline) return;
-    switch (effectType) {
-      case "audio.gain":
-        pipeline.setVolume(value);
-        break;
-      case "audio.pan":
-        // Convert 0-1 (lexicon) to -1..1 (Web Audio)
-        pipeline.setPan((value - 0.5) * 2);
-        break;
-    }
-  }
-
-  onCleanup(() => {
-    pipeline?.disconnect();
-    props.onPlayerChange?.(props.id, null);
-  });
-
-  // Load clip blob into player when it changes
-  createEffect(() => {
-    const blob = clipBlob();
-    if (blob) {
-      playerHook
-        .load(blob)
-        .then(async () => {
-          const player = playerHook.player();
-          if (player) {
-            // Seek to 0 to buffer and display the first frame
-            await playerHook.seek(0);
-            props.onPlayerChange?.(props.id, player);
-          }
-        })
-        .catch((err) => {
-          console.error("Failed to load clip:", err);
-        });
-    } else {
-      playerHook.unload();
-      props.onPlayerChange?.(props.id, null);
-    }
-  });
-
-  // Track last state to detect stop vs pause
-  let lastIsPlaying: boolean | undefined;
-  let lastCurrentTime: number | undefined;
-
-  // React to global play/pause/stop and seek
-  createEffect(() => {
-    // Need player to be loaded, but allow any state (including 'playing')
-    if (!hasRecording() || !playerHook.player()) return;
-
-    const isPlaying = props.isPlaying;
-    const currentTime = props.currentTime;
-
-    // Detect stop: was playing (or had a position), now not playing with currentTime=0
-    const isStop =
-      !isPlaying &&
-      currentTime === 0 &&
-      (lastIsPlaying || lastCurrentTime !== 0);
-
-    if (isStop) {
-      // Call stop() which properly resets the player
-      playerHook.stop();
-    } else if (currentTime !== undefined && currentTime !== lastCurrentTime) {
-      // Seek to new time
-      playerHook.seek(currentTime).catch(() => {
-        // Ignore seek errors during rapid state changes
-      });
-    }
-
-    // Handle play/pause (but not if we just stopped)
-    if (!isStop) {
-      if (isPlaying) {
-        playerHook.play().catch(() => {
-          // Ignore play errors
-        });
-      } else if (lastIsPlaying) {
-        // Only pause if we were previously playing (not on initial load)
-        playerHook.pause();
-      }
-    }
-
-    lastIsPlaying = isPlaying;
-    lastCurrentTime = currentTime;
-  });
-
-  function handleClear() {
-    playerHook.unload();
-    pipeline?.disconnect();
-    props.onPlayerChange?.(props.id, null);
-    props.onClear?.();
-  }
-
-  // Generic effect change handler
-  function handleEffectChange(
-    effect: AudioEffect,
-    index: number,
-    value: number,
-  ) {
-    project.setEffectValue(trackId, index, value);
-    applyEffectToAudioPipeline(effect.type, value);
-  }
-
   function getStatus() {
     if (props.isLoading) return "Loading...";
     if (props.isRecording) return "Recording";
     if (props.isSelected) return "Preview";
-    if (props.isPlaying && hasRecording()) return "Playing";
-    if (hasRecording()) return "Ready";
+    if (props.isPlaying && props.hasClip) return "Playing";
+    if (props.hasClip) return "Ready";
     return "Empty";
-  }
-
-  // Get display value for an effect (handles pan conversion for UI)
-  function getDisplayValue(effect: AudioEffect, index: number): number {
-    const value = getEffectValue(index);
-    // Pan uses -1..1 for display but 0..1 for storage
-    if (effect.type === "audio.pan") {
-      return (value - 0.5) * 2;
-    }
-    return value;
-  }
-
-  // Convert display value back for storage
-  function parseDisplayValue(
-    effect: AudioEffect,
-    displayValue: number,
-  ): number {
-    if (effect.type === "audio.pan") {
-      return (displayValue + 1) / 2;
-    }
-    return displayValue;
-  }
-
-  // Get slider config for each effect type
-  function getSliderConfig(effect: AudioEffect) {
-    switch (effect.type) {
-      case "audio.gain":
-        return { min: 0, max: 1, step: 0.01, label: "Vol" };
-      case "audio.pan":
-        return { min: -1, max: 1, step: 0.01, label: "Pan" };
-      default:
-        return { min: 0, max: 1, step: 0.01, label: "Custom" };
-    }
   }
 
   return (
@@ -220,10 +36,10 @@ export const Track: Component<TrackProps> = (props) => {
         styles.track,
         props.isSelected && styles.selected,
         props.isRecording && styles.recording,
-        hasRecording() && styles.hasRecording,
+        props.hasClip && styles.hasRecording
       )}
       onClick={props.onSelect}
-      onKeyDown={(event) => event.code === "Enter" && props.onSelect?.()}
+      onKeyDown={(event) => event.code === "Enter" && props.onSelect()}
     >
       <div class={styles.trackHeader}>
         <span class={styles.trackLabel}>Track {props.id + 1}</span>
@@ -231,41 +47,40 @@ export const Track: Component<TrackProps> = (props) => {
       </div>
 
       <div class={styles.sliders}>
-        <For each={audioPipeline()}>
-          {(effect, index) => {
-            const config = getSliderConfig(effect);
-            return (
-              <label class={styles.slider}>
-                <span>{config.label}</span>
-                <input
-                  type="range"
-                  min={config.min}
-                  max={config.max}
-                  step={config.step}
-                  value={getDisplayValue(effect, index())}
-                  onInput={(e) => {
-                    const displayValue = parseFloat(
-                      (e.target as HTMLInputElement).value,
-                    );
-                    const storeValue = parseDisplayValue(effect, displayValue);
-                    handleEffectChange(effect, index(), storeValue);
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </label>
-            );
-          }}
-        </For>
+        <label class={styles.slider}>
+          <span>Vol</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={props.volume}
+            onInput={(e) => props.onVolumeChange(parseFloat(e.target.value))}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </label>
+        <label class={styles.slider}>
+          <span>Pan</span>
+          <input
+            type="range"
+            min={-1}
+            max={1}
+            step={0.01}
+            value={props.pan}
+            onInput={(e) => props.onPanChange(parseFloat(e.target.value))}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </label>
       </div>
 
-      <Show when={hasRecording()}>
+      <Show when={props.hasClip}>
         <div class={styles.controls}>
           <button
             type="button"
             class={styles.clearButton}
             onClick={(e) => {
               e.stopPropagation();
-              handleClear();
+              props.onClear();
             }}
           >
             <FiTrash2 size={14} />

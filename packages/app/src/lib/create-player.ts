@@ -1,161 +1,267 @@
+import { createDemuxer, type Demuxer } from "@klip/codecs";
 import { createCompositor, type VideoSource } from "@klip/compositor";
-import type { Playback } from "@klip/playback";
-import { createComputed } from "solid-js";
+import { createAudioPipeline, type AudioPipeline } from "@klip/mixer";
+import { createPlayback, type Playback } from "@klip/playback";
 
-export interface PlayerSlot {
-  playback: Playback;
-  trackIndex: number;
-  unsubscribe: () => void;
+export interface TrackSlot {
+  playback: Playback | null;
+  demuxer: Demuxer | null;
+  audioPipeline: AudioPipeline;
 }
 
 export interface Player {
   /** The canvas element for rendering */
   readonly canvas: HTMLCanvasElement;
 
-  /** Currently attached players */
-  readonly slots: ReadonlyArray<PlayerSlot | null>;
+  /** Get track slot info */
+  getSlot(trackIndex: number): TrackSlot;
 
-  /** Set a video source for a track (for preview) */
-  setSource(trackIndex: number, source: VideoSource | null): void;
+  /** Check if a track has a clip loaded */
+  hasClip(trackIndex: number): boolean;
 
-  /** Set a video frame for a track */
-  setFrame(trackIndex: number, frame: VideoFrame | null): void;
+  /** Load a clip from blob into a track */
+  loadClip(trackIndex: number, blob: Blob): Promise<void>;
 
-  /** Attach a playback instance to a track */
-  attach(trackIndex: number, playback: Playback): void;
+  /** Clear a clip from a track */
+  clearClip(trackIndex: number): void;
 
-  /** Detach a playback instance from a track */
-  detach(trackIndex: number): void;
+  /** Set a video source for a track (for camera preview) */
+  setPreviewSource(trackIndex: number, source: VideoSource | null): void;
 
-  /** Start the render loop */
-  start(): void;
+  /** Start playback from time (affects all tracks with clips) */
+  play(time?: number): Promise<void>;
 
-  /** Stop the render loop */
-  stop(): void;
+  /** Pause playback */
+  pause(): void;
 
-  /** Render a single frame */
-  renderFrame(): void;
+  /** Stop and seek to beginning (shows first frames) */
+  stop(): Promise<void>;
+
+  /** Seek all tracks to time */
+  seek(time: number): Promise<void>;
+
+  /** Set volume for a track (0-1) */
+  setVolume(trackIndex: number, value: number): void;
+
+  /** Set pan for a track (-1 to 1) */
+  setPan(trackIndex: number, value: number): void;
+
+  /** Whether currently playing */
+  readonly isPlaying: boolean;
+
+  /** Current playback time */
+  readonly currentTime: number;
 
   /** Clean up all resources */
   destroy(): void;
 }
 
-export interface PlayerOptions {
-  /** Whether to start rendering immediately (default: true) */
-  autoStart?: boolean;
-}
+const NUM_TRACKS = 4;
 
 /**
- * Create a playback compositor
+ * Create a player that manages compositor, playbacks, and audio pipelines
  */
-export function createPlayer(
-  width: number,
-  height: number,
-  options: PlayerOptions = {}
-): Player {
+export function createPlayer(width: number, height: number): Player {
   const compositor = createCompositor(width, height);
-  const slots: (PlayerSlot | null)[] = [null, null, null, null];
+
+  // Create slots with audio pipelines (pipelines are created once, playbacks are per-clip)
+  const slots: TrackSlot[] = Array.from({ length: NUM_TRACKS }, () => ({
+    playback: null,
+    demuxer: null,
+    audioPipeline: createAudioPipeline(),
+  }));
+
   let animationFrameId: number | null = null;
-  let isRunning = false;
+  let isPlaying = false;
+  let currentTime = 0;
 
+  // Render loop - polls frames from all playbacks
   function renderLoop() {
-    if (!isRunning) return;
-
-    // Update compositor with current frames from all players
-    for (const slot of slots) {
-      if (slot) {
-        const frame = slot.playback.getCurrentFrame();
-        compositor.setFrame(slot.trackIndex, frame);
+    // Update compositor with current frames from all playbacks
+    for (let i = 0; i < NUM_TRACKS; i++) {
+      const { playback } = slots[i];
+      if (playback) {
+        const frame = playback.getCurrentFrame();
+        compositor.setFrame(i, frame);
       }
     }
 
     compositor.render();
     animationFrameId = requestAnimationFrame(renderLoop);
-  };
+  }
 
-
-  function start(): void {
-    if (isRunning) return;
-    isRunning = true;
+  function startRenderLoop() {
+    if (animationFrameId !== null) return;
     animationFrameId = requestAnimationFrame(renderLoop);
   }
 
-  function stop(): void {
-    isRunning = false;
+  function stopRenderLoop() {
     if (animationFrameId !== null) {
       cancelAnimationFrame(animationFrameId);
       animationFrameId = null;
     }
   }
 
-  function detach(trackIndex: number): void {
-    const slot = slots[trackIndex];
-    if (slot) {
-      slot.unsubscribe();
-      compositor.setFrame(trackIndex, null);
-      slots[trackIndex] = null;
-    }
-  }
-
-  createComputed(() => {
-    if (options.autoStart ?? true) {
-      start();
-    }
-  })
+  // Start render loop immediately
+  startRenderLoop();
 
   return {
     get canvas() {
       return compositor.canvas;
     },
 
-    get slots() {
-      return slots;
+    get isPlaying() {
+      return isPlaying;
     },
 
-    detach,
-    start,
-    stop,
-    setSource: compositor.setSource.bind(compositor),
-    setFrame: compositor.setFrame.bind(compositor),
-
-    attach(trackIndex: number, playback: Playback): void {
-      if (trackIndex < 0 || trackIndex > 3) {
-        throw new Error(`Track index must be 0-3, got ${trackIndex}`);
-      }
-
-      // Detach existing if any
-      if (slots[trackIndex]) {
-        detach(trackIndex);
-      }
-
-      const unsubscribe = playback.onFrame(() => {
-        // Frame updates handled in render loop
-      });
-
-      slots[trackIndex] = {
-        playback,
-        trackIndex,
-        unsubscribe,
-      };
-    },
-
-    renderFrame(): void {
+    get currentTime() {
+      // Return time from first playing playback, or stored currentTime
       for (const slot of slots) {
-        if (slot) {
-          const frame = slot.playback.getCurrentFrame();
-          compositor.setFrame(slot.trackIndex, frame);
+        if (slot.playback?.state === "playing") {
+          return slot.playback.currentTime;
         }
       }
-      compositor.render();
+      return currentTime;
+    },
+
+    getSlot(trackIndex: number): TrackSlot {
+      return slots[trackIndex];
+    },
+
+    hasClip(trackIndex: number): boolean {
+      return slots[trackIndex].playback !== null;
+    },
+
+    async loadClip(trackIndex: number, blob: Blob): Promise<void> {
+      const slot = slots[trackIndex];
+
+      // Clean up existing playback
+      if (slot.playback) {
+        slot.playback.destroy();
+        slot.playback = null;
+      }
+      if (slot.demuxer) {
+        slot.demuxer.destroy();
+        slot.demuxer = null;
+      }
+
+      // Create new demuxer and playback
+      const buffer = await blob.arrayBuffer();
+      const demuxer = await createDemuxer(buffer);
+      const playback = await createPlayback(demuxer, {
+        audioDestination: slot.audioPipeline.gain,
+      });
+
+      slot.demuxer = demuxer;
+      slot.playback = playback;
+
+      // Seek to 0 to buffer first frame
+      await playback.seek(0);
+    },
+
+    clearClip(trackIndex: number): void {
+      const slot = slots[trackIndex];
+
+      if (slot.playback) {
+        slot.playback.destroy();
+        slot.playback = null;
+      }
+      if (slot.demuxer) {
+        slot.demuxer.destroy();
+        slot.demuxer = null;
+      }
+
+      // Clear compositor source
+      compositor.setFrame(trackIndex, null);
+    },
+
+    setPreviewSource(trackIndex: number, source: VideoSource | null): void {
+      compositor.setSource(trackIndex, source);
+    },
+
+    async play(time?: number): Promise<void> {
+      const startTime = time ?? currentTime;
+      isPlaying = true;
+      currentTime = startTime;
+
+      // Start all playbacks
+      const promises: Promise<void>[] = [];
+      for (const slot of slots) {
+        if (slot.playback) {
+          promises.push(slot.playback.play(startTime));
+        }
+      }
+      await Promise.all(promises);
+    },
+
+    pause(): void {
+      isPlaying = false;
+
+      // Update currentTime from first active playback
+      for (const slot of slots) {
+        if (slot.playback && slot.playback.state === "playing") {
+          currentTime = slot.playback.currentTime;
+          break;
+        }
+      }
+
+      // Pause all playbacks
+      for (const slot of slots) {
+        if (slot.playback) {
+          slot.playback.pause();
+        }
+      }
+    },
+
+    async stop(): Promise<void> {
+      isPlaying = false;
+      currentTime = 0;
+
+      // Seek all playbacks to 0 (this keeps frames buffered for display)
+      const promises: Promise<void>[] = [];
+      for (const slot of slots) {
+        if (slot.playback) {
+          promises.push(slot.playback.seek(0));
+        }
+      }
+      await Promise.all(promises);
+    },
+
+    async seek(time: number): Promise<void> {
+      currentTime = time;
+
+      // Seek all playbacks
+      const promises: Promise<void>[] = [];
+      for (const slot of slots) {
+        if (slot.playback) {
+          promises.push(slot.playback.seek(time));
+        }
+      }
+      await Promise.all(promises);
+    },
+
+    setVolume(trackIndex: number, value: number): void {
+      slots[trackIndex].audioPipeline.setVolume(value);
+    },
+
+    setPan(trackIndex: number, value: number): void {
+      slots[trackIndex].audioPipeline.setPan(value);
     },
 
     destroy(): void {
-      stop();
-      for (let i = 0; i < 4; i++) {
-        if (slots[i]) {
-          detach(i);
+      stopRenderLoop();
+
+      for (let i = 0; i < NUM_TRACKS; i++) {
+        const slot = slots[i];
+        if (slot.playback) {
+          slot.playback.destroy();
         }
+        if (slot.demuxer) {
+          slot.demuxer.destroy();
+        }
+        slot.audioPipeline.disconnect();
       }
+
       compositor.destroy();
     },
   };
