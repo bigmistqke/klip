@@ -8,7 +8,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@bigmistqke/view.gl": "^0.1.9"
+    "@bigmistqke/view.gl": "^0.1.9",
+    "@klip/utils": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

@@ -7,6 +7,9 @@ import {
   type InputAudioTrack,
   type EncodedPacket,
 } from 'mediabunny'
+import { debug } from '@klip/utils'
+
+const log = debug('demuxer', true)
 
 export interface VideoTrackInfo {
   id: number
@@ -148,6 +151,8 @@ async function parseAudioTrack(track: InputAudioTrack, index: number): Promise<A
 }
 
 export async function createDemuxer(source: ArrayBuffer | Blob): Promise<Demuxer> {
+  log('createDemuxer', { sourceType: source instanceof Blob ? 'Blob' : 'ArrayBuffer', size: source instanceof Blob ? source.size : source.byteLength })
+
   // Convert ArrayBuffer to Blob if needed
   const blob = source instanceof Blob ? source : new Blob([source])
 
@@ -178,6 +183,14 @@ export async function createDemuxer(source: ArrayBuffer | Blob): Promise<Demuxer
     videoTracks: videoTrackInfos,
     audioTracks: audioTrackInfos,
   }
+
+  log('createDemuxer complete', {
+    duration,
+    videoTracks: videoTrackInfos.length,
+    audioTracks: audioTrackInfos.length,
+    firstVideoCodec: videoTrackInfos[0]?.codec,
+    firstAudioCodec: audioTrackInfos[0]?.codec,
+  })
 
   // Build track lookup maps
   const videoTrackMap = new Map<number, { track: InputVideoTrack, sink: EncodedPacketSink }>()

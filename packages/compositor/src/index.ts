@@ -1,4 +1,7 @@
 import { compile, glsl, uniform } from '@bigmistqke/view.gl/tag'
+import { debug } from '@klip/utils'
+
+const log = debug('compositor', true)
 
 const fragmentShader = glsl`
   precision mediump float;
@@ -84,12 +87,16 @@ export interface Compositor {
 }
 
 export function createCompositor(width: number, height: number): Compositor {
+  log('createCompositor', { width, height })
+
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
 
   const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
   if (!gl) throw new Error('WebGL not supported')
+
+  log('WebGL context created', { version: gl instanceof WebGL2RenderingContext ? 'webgl2' : 'webgl' })
 
   const { view, program } = compile.toQuad(gl, fragmentShader)
   const textures = [

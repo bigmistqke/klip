@@ -2,6 +2,10 @@
  * Audio Scheduler - Schedules decoded AudioData for playback via Web Audio API
  */
 
+import { debug } from '@klip/utils'
+
+const log = debug('audio-scheduler', true)
+
 /** Playback state */
 export type AudioSchedulerState = 'stopped' | 'playing' | 'paused'
 
@@ -104,6 +108,7 @@ function audioDataToBuffer(audioData: AudioData, audioContext: AudioContext): Au
  * Create an audio scheduler for Web Audio API playback
  */
 export function createAudioScheduler(options: AudioSchedulerOptions = {}): AudioScheduler {
+  log('createAudioScheduler')
   const scheduleAhead = options.scheduleAhead ?? 0.5
   // Use the destination's context if available, otherwise use provided context or create new
   const audioContext = options.destination?.context as AudioContext
@@ -218,6 +223,7 @@ export function createAudioScheduler(options: AudioSchedulerOptions = {}): Audio
     },
 
     play(startTime: number = 0): void {
+      log('play', { startTime, currentState: state })
       if (state === 'playing') {
         return
       }
@@ -241,6 +247,7 @@ export function createAudioScheduler(options: AudioSchedulerOptions = {}): Audio
     },
 
     pause(): void {
+      log('pause', { currentState: state })
       if (state !== 'playing') {
         return
       }
@@ -255,6 +262,7 @@ export function createAudioScheduler(options: AudioSchedulerOptions = {}): Audio
     },
 
     stop(): void {
+      log('stop', { currentState: state })
       clearAllScheduled()
       state = 'stopped'
       playbackStartContextTime = 0
@@ -263,6 +271,7 @@ export function createAudioScheduler(options: AudioSchedulerOptions = {}): Audio
     },
 
     seek(time: number): void {
+      log('seek', { time, currentState: state })
       const wasPlaying = state === 'playing'
 
       // Clear all scheduled audio

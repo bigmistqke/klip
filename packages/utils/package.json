@@ -1,6 +1,6 @@
 {
-  "name": "@klip/mixer",
-  "version": "0.1.0",
+  "name": "@klip/utils",
+  "version": "0.0.1",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@klip/utils": "workspace:*"
+    "@bigmistqke/view.gl": "^0.1.9"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

@@ -1,5 +1,8 @@
+import { debug } from '@klip/utils'
 import { getAudioContext } from './context'
 import { getMasterMixer } from './mixer'
+
+const log = debug('audio-pipeline', true)
 
 // Re-export context utilities
 export { getAudioContext, resumeAudioContext } from './context'

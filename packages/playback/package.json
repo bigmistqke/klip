@@ -7,10 +7,19 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test:browser": "vitest --config vitest.browser.config.ts",
+    "test:browser:run": "vitest run --config vitest.browser.config.ts"
+  },
   "dependencies": {
-    "@klip/codecs": "workspace:*"
+    "@klip/codecs": "workspace:*",
+    "@klip/utils": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.7.0"
+    "@vitest/browser": "^4.0.16",
+    "@vitest/browser-playwright": "^4.0.16",
+    "playwright": "^1.57.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.16"
   }
 }

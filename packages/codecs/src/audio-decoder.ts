@@ -1,4 +1,7 @@
+import { debug } from '@klip/utils'
 import type { DemuxedSample, AudioTrackInfo, Demuxer } from './demuxer'
+
+const log = debug('audio-decoder', true)
 
 export interface AudioDecoderHandle {
   readonly config: AudioDecoderConfig
@@ -53,8 +56,11 @@ export async function createAudioDecoder(
   _trackInfo: AudioTrackInfo,
   options: CreateAudioDecoderOptions = {}
 ): Promise<AudioDecoderHandle> {
+  log('createAudioDecoder')
+
   // Get config from demuxer
   const config = await demuxer.getAudioConfig()
+  log('got config', { codec: config.codec, sampleRate: config.sampleRate, channels: config.numberOfChannels })
 
   // Check if the codec is supported
   const support = await AudioDecoder.isConfigSupported(config)

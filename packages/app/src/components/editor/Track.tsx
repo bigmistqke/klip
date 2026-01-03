@@ -36,7 +36,7 @@ export const Track: Component<TrackProps> = (props) => {
         styles.track,
         props.isSelected && styles.selected,
         props.isRecording && styles.recording,
-        props.hasClip && styles.hasRecording
+        props.hasClip && styles.hasRecording,
       )}
       onClick={props.onSelect}
       onKeyDown={(event) => event.code === "Enter" && props.onSelect()}

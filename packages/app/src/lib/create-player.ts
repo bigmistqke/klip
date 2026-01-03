@@ -2,6 +2,9 @@ import { createDemuxer, type Demuxer } from "@klip/codecs";
 import { createCompositor, type VideoSource } from "@klip/compositor";
 import { createAudioPipeline, type AudioPipeline } from "@klip/mixer";
 import { createPlayback, type Playback } from "@klip/playback";
+import { debug } from "@klip/utils";
+
+const log = debug("player", true);
 
 export interface TrackSlot {
   playback: Playback | null;
@@ -60,6 +63,7 @@ const NUM_TRACKS = 4;
 
 /**
  * Create a player that manages compositor, playbacks, and audio pipelines
+ * Owns the single render loop and master clock
  */
 export function createPlayer(width: number, height: number): Player {
   const compositor = createCompositor(width, height);
@@ -71,31 +75,62 @@ export function createPlayer(width: number, height: number): Player {
     audioPipeline: createAudioPipeline(),
   }));
 
+  // Render loop state
   let animationFrameId: number | null = null;
-  let isPlaying = false;
-  let currentTime = 0;
 
-  // Render loop - polls frames from all playbacks
+  // Master clock state
+  let isPlaying = false;
+  let clockTime = 0;
+  let clockStartTime = 0; // performance.now() when playback started
+  let clockStartPosition = 0; // clockTime when playback started
+
+  /**
+   * Calculate current clock time
+   */
+  function getCurrentClockTime(): number {
+    if (isPlaying) {
+      const elapsed = (performance.now() - clockStartTime) / 1000;
+      return clockStartPosition + elapsed;
+    }
+    return clockTime;
+  }
+
+  /**
+   * Single render loop - drives everything
+   */
   function renderLoop() {
-    // Update compositor with current frames from all playbacks
+    const time = getCurrentClockTime();
+
+    // Update compositor with frames from all playbacks
     for (let i = 0; i < NUM_TRACKS; i++) {
       const { playback } = slots[i];
       if (playback) {
-        const frame = playback.getCurrentFrame();
+        // Use tick() when playing, getFrameAt() when static
+        const frame = isPlaying
+          ? playback.tick(time)
+          : playback.getFrameAt(time);
         compositor.setFrame(i, frame);
       }
     }
 
+    // Render the compositor
     compositor.render();
+
+    // Update stored clock time
+    clockTime = time;
+
+    // Schedule next frame
     animationFrameId = requestAnimationFrame(renderLoop);
   }
 
   function startRenderLoop() {
     if (animationFrameId !== null) return;
+    log("startRenderLoop");
     animationFrameId = requestAnimationFrame(renderLoop);
   }
 
   function stopRenderLoop() {
+    log("stopRenderLoop");
     if (animationFrameId !== null) {
       cancelAnimationFrame(animationFrameId);
       animationFrameId = null;
@@ -115,13 +150,7 @@ export function createPlayer(width: number, height: number): Player {
     },
 
     get currentTime() {
-      // Return time from first playing playback, or stored currentTime
-      for (const slot of slots) {
-        if (slot.playback?.state === "playing") {
-          return slot.playback.currentTime;
-        }
-      }
-      return currentTime;
+      return getCurrentClockTime();
     },
 
     getSlot(trackIndex: number): TrackSlot {
@@ -133,10 +162,12 @@ export function createPlayer(width: number, height: number): Player {
     },
 
     async loadClip(trackIndex: number, blob: Blob): Promise<void> {
+      log("loadClip start", { trackIndex, blobSize: blob.size });
       const slot = slots[trackIndex];
 
       // Clean up existing playback
       if (slot.playback) {
+        log("loadClip: destroying existing playback", { trackIndex });
         slot.playback.destroy();
         slot.playback = null;
       }
@@ -155,8 +186,10 @@ export function createPlayer(width: number, height: number): Player {
       slot.demuxer = demuxer;
       slot.playback = playback;
 
-      // Seek to 0 to buffer first frame
+      // Buffer first frame for display
+      log("loadClip: seeking to 0 to buffer first frame", { trackIndex });
       await playback.seek(0);
+      log("loadClip complete", { trackIndex });
     },
 
     clearClip(trackIndex: number): void {
@@ -180,64 +213,111 @@ export function createPlayer(width: number, height: number): Player {
     },
 
     async play(time?: number): Promise<void> {
-      const startTime = time ?? currentTime;
-      isPlaying = true;
-      currentTime = startTime;
+      const startTime = time ?? clockTime;
+      log("play", { startTime, numPlaybacks: slots.filter((s) => s.playback).length });
 
-      // Start all playbacks
-      const promises: Promise<void>[] = [];
-      for (const slot of slots) {
+      // Prepare all playbacks
+      const preparePromises: Promise<void>[] = [];
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
         if (slot.playback) {
-          promises.push(slot.playback.play(startTime));
+          log("play: preparing playback", { trackIndex: i });
+          preparePromises.push(slot.playback.prepareToPlay(startTime));
         }
       }
-      await Promise.all(promises);
+      await Promise.all(preparePromises);
+
+      // Start audio on all playbacks
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
+        if (slot.playback) {
+          slot.playback.startAudio(startTime);
+        }
+      }
+
+      // Start the clock
+      clockStartPosition = startTime;
+      clockStartTime = performance.now();
+      isPlaying = true;
+
+      log("play complete");
     },
 
     pause(): void {
-      isPlaying = false;
+      log("pause", { isPlaying });
+      if (!isPlaying) return;
 
-      // Update currentTime from first active playback
-      for (const slot of slots) {
-        if (slot.playback && slot.playback.state === "playing") {
-          currentTime = slot.playback.currentTime;
-          break;
-        }
-      }
+      // Save current clock time
+      clockTime = getCurrentClockTime();
 
       // Pause all playbacks
-      for (const slot of slots) {
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
         if (slot.playback) {
           slot.playback.pause();
         }
       }
+
+      isPlaying = false;
+      log("pause complete", { clockTime });
     },
 
     async stop(): Promise<void> {
+      log("stop");
       isPlaying = false;
-      currentTime = 0;
+      clockTime = 0;
+      clockStartPosition = 0;
 
-      // Seek all playbacks to 0 (this keeps frames buffered for display)
-      const promises: Promise<void>[] = [];
-      for (const slot of slots) {
+      // Stop all playbacks
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
         if (slot.playback) {
-          promises.push(slot.playback.seek(0));
+          slot.playback.stop();
         }
       }
-      await Promise.all(promises);
+
+      // Seek all to 0 to buffer first frames
+      const seekPromises: Promise<void>[] = [];
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
+        if (slot.playback) {
+          seekPromises.push(slot.playback.seek(0));
+        }
+      }
+      await Promise.all(seekPromises);
+
+      log("stop complete");
     },
 
     async seek(time: number): Promise<void> {
-      currentTime = time;
+      log("seek", { time, isPlaying });
+      const wasPlaying = isPlaying;
+
+      // Pause during seek
+      if (isPlaying) {
+        isPlaying = false;
+      }
+
+      clockTime = time;
+      clockStartPosition = time;
 
       // Seek all playbacks
-      const promises: Promise<void>[] = [];
-      for (const slot of slots) {
+      const seekPromises: Promise<void>[] = [];
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
         if (slot.playback) {
-          promises.push(slot.playback.seek(time));
+          seekPromises.push(slot.playback.seek(time));
         }
       }
-      await Promise.all(promises);
+      await Promise.all(seekPromises);
+
+      // Resume if was playing
+      if (wasPlaying) {
+        clockStartTime = performance.now();
+        isPlaying = true;
+      }
+
+      log("seek complete", { isPlaying });
     },
 
     setVolume(trackIndex: number, value: number): void {

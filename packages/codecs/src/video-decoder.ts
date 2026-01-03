@@ -1,4 +1,7 @@
+import { debug } from '@klip/utils'
 import type { DemuxedSample, Demuxer, VideoTrackInfo } from './demuxer'
+
+const log = debug('video-decoder', true)
 
 export interface VideoDecoderHandle {
   readonly config: VideoDecoderConfig
@@ -58,8 +61,11 @@ export async function createVideoDecoder(
   _trackInfo: VideoTrackInfo,
   options: CreateVideoDecoderOptions = {}
 ): Promise<VideoDecoderHandle> {
+  log('createVideoDecoder')
+
   // Get config from demuxer
   const config = await demuxer.getVideoConfig()
+  log('got config', { codec: config.codec, width: config.codedWidth, height: config.codedHeight })
 
   // Check if the codec is supported
   const support = await VideoDecoder.isConfigSupported({

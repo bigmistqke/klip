@@ -1,9 +1,6 @@
-/**
- * Synchronized A/V Player - Coordinates video frame buffer and audio scheduler
- */
-
 import type { AudioTrackInfo, Demuxer, VideoTrackInfo } from '@klip/codecs'
 import { createAudioDecoder, type AudioDecoderHandle } from '@klip/codecs'
+import { debug } from '@klip/utils'
 import type { AudioScheduler } from './audio-scheduler'
 import { createAudioScheduler } from './audio-scheduler'
 import type { FrameBuffer } from './frame-buffer'
@@ -29,9 +26,6 @@ export interface Playback {
   /** Current player state */
   readonly state: PlaybackState
 
-  /** Current playback time in seconds */
-  readonly currentTime: number
-
   /** Total duration in seconds */
   readonly duration: number
 
@@ -48,10 +42,16 @@ export interface Playback {
   readonly audioScheduler: AudioScheduler | null
 
   /**
-   * Start playback
-   * @param time - Optional start time (default: current position or 0)
+   * Prepare for playback starting at given time
+   * Buffers video and audio, sets up audio scheduler
    */
-  play(time?: number): Promise<void>
+  prepareToPlay(startTime: number): Promise<void>
+
+  /**
+   * Start audio playback at given time
+   * Call after prepareToPlay
+   */
+  startAudio(startTime: number): void
 
   /**
    * Pause playback
@@ -59,33 +59,30 @@ export interface Playback {
   pause(): void
 
   /**
-   * Stop playback and reset to beginning
+   * Stop playback and reset
    */
   stop(): void
 
   /**
-   * Seek to a specific time
-   * @param time - Time in seconds
+   * Seek to a specific time (buffers frames around that time)
    */
   seek(time: number): Promise<void>
 
   /**
-   * Get the current video frame for rendering
-   * Returns null if no frame is available
+   * Tick the playback at given clock time
+   * Buffers more content as needed, schedules audio
+   * @param clockTime - Current time from master clock
+   * @returns Current video frame or null
    */
-  getCurrentFrame(): VideoFrame | null
+  tick(clockTime: number): VideoFrame | null
 
   /**
-   * Register a callback for frame updates (called on each animation frame during playback)
-   * @param callback - Function called with the current VideoFrame (or null)
-   * @returns Unsubscribe function
+   * Get frame at specific time (for static display)
    */
-  onFrame(callback: (frame: VideoFrame | null, time: number) => void): () => void
+  getFrameAt(time: number): VideoFrame | null
 
   /**
    * Register a callback for state changes
-   * @param callback - Function called when state changes
-   * @returns Unsubscribe function
    */
   onStateChange(callback: (state: PlaybackState) => void): () => void
 
@@ -96,12 +93,18 @@ export interface Playback {
 }
 
 /**
- * Create a synchronized A/V player
+ * Create a synchronized A/V playback
  */
+let playbackIdCounter = 0
+
 export async function createPlayback(
   demuxer: Demuxer,
   options: PlaybackOptions = {}
 ): Promise<Playback> {
+  const id = String(playbackIdCounter++)
+  const log = debug(`playback-${id}`, true)
+  log('creating playback')
+
   const videoBufferAhead = options.videoBufferAhead ?? 2
   const audioBufferAhead = options.audioBufferAhead ?? 0.5
   const maxVideoFrames = options.maxVideoFrames ?? 60
@@ -116,19 +119,15 @@ export async function createPlayback(
 
   // State
   let state: PlaybackState = 'loading'
-  let animationFrameId: number | null = null
   let lastFramePts = -1
-
-  // Video-only playback timing (used when no audio scheduler)
-  let playbackStartTime = 0 // performance.now() when playback started
-  let playbackStartPosition = 0 // position in seconds when playback started
+  let lastTickTime = -1
 
   // Callbacks
-  const frameCallbacks: Array<(frame: VideoFrame | null, time: number) => void> = []
   const stateCallbacks: Array<(state: PlaybackState) => void> = []
 
   const setState = (newState: PlaybackState) => {
     if (state !== newState) {
+      log('setState', { from: state, to: newState })
       state = newState
       for (const cb of stateCallbacks) {
         cb(newState)
@@ -163,20 +162,6 @@ export async function createPlayback(
     audioTrack?.duration ?? 0
   )
 
-  /** Get current time from audio scheduler or calculate from elapsed time */
-  const getCurrentTime = (): number => {
-    if (audioScheduler && audioScheduler.state === 'playing') {
-      return audioScheduler.currentTime
-    }
-    // Video-only playback: calculate time from elapsed since playback start
-    if (state === 'playing') {
-      const elapsed = (performance.now() - playbackStartTime) / 1000
-      return playbackStartPosition + elapsed
-    }
-    // When paused/stopped, return the last known position
-    return playbackStartPosition
-  }
-
   /** Buffer and schedule audio for a time range */
   const bufferAudio = async (startTime: number, endTime: number) => {
     if (!audioTrack || !audioDecoder || !audioScheduler) return
@@ -184,7 +169,6 @@ export async function createPlayback(
     const samples = await demuxer.getSamples(audioTrack.id, startTime, endTime)
     if (samples.length === 0) return
 
-    // Decode and schedule each sample
     for (const sample of samples) {
       try {
         const audioData = await audioDecoder.decode(sample)
@@ -196,46 +180,11 @@ export async function createPlayback(
     }
   }
 
-  /** Animation frame loop for video rendering */
-  const renderLoop = () => {
-    if (state !== 'playing') return
-
-    const currentTime = getCurrentTime()
-
-    // Check if we've reached the end (only if duration is known)
-    if (duration > 0 && currentTime >= duration) {
-      setState('ended')
-      return
-    }
-
-    // Get current frame
-    let currentFrame: VideoFrame | null = null
-    if (frameBuffer) {
-      const bufferedFrame = frameBuffer.getFrame(currentTime)
-      if (bufferedFrame && bufferedFrame.pts !== lastFramePts) {
-        currentFrame = bufferedFrame.frame
-        lastFramePts = bufferedFrame.pts
-      }
-    }
-
-    // Notify frame callbacks
-    for (const cb of frameCallbacks) {
-      cb(currentFrame, currentTime)
-    }
-
-    // Buffer more video if needed
-    if (frameBuffer && !frameBuffer.isBufferedAt(currentTime + videoBufferAhead / 2)) {
-      frameBuffer.bufferMore()
-    }
-
-    // Buffer more audio if needed
-    if (audioScheduler && audioTrack) {
-      const audioEnd = currentTime + audioBufferAhead
-      bufferAudio(currentTime, audioEnd)
-    }
-
-    // Schedule next frame
-    animationFrameId = requestAnimationFrame(renderLoop)
+  /** Get frame at specific time */
+  const getFrameAtTime = (time: number): VideoFrame | null => {
+    if (!frameBuffer) return null
+    const bufferedFrame = frameBuffer.getFrame(time)
+    return bufferedFrame?.frame ?? null
   }
 
   // Mark as ready
@@ -244,10 +193,6 @@ export async function createPlayback(
   return {
     get state() {
       return state
-    },
-
-    get currentTime() {
-      return getCurrentTime()
     },
 
     get duration() {
@@ -270,30 +215,18 @@ export async function createPlayback(
       return audioScheduler
     },
 
-    async play(time?: number): Promise<void> {
-      if (state === 'playing') return
-
-      const startTime = time ?? getCurrentTime()
-      const previousState = state // Capture before changing
-
+    async prepareToPlay(startTime: number): Promise<void> {
+      log('prepareToPlay', { startTime, currentState: state })
       setState('loading')
 
-      // Seek to start position if:
-      // - explicit time provided
-      // - state was ready/ended (needs initialization)
-      // - frame buffer is empty (e.g., after stop())
-      const needsSeek = time !== undefined ||
-        previousState === 'ready' ||
-        previousState === 'ended' ||
-        (frameBuffer && frameBuffer.frameCount === 0)
+      // Buffer video
+      if (frameBuffer) {
+        await frameBuffer.seekTo(startTime)
+      }
 
-      if (needsSeek) {
-        if (frameBuffer) {
-          await frameBuffer.seekTo(startTime)
-        }
-        if (audioScheduler) {
-          audioScheduler.seek(startTime)
-        }
+      // Seek audio
+      if (audioScheduler) {
+        audioScheduler.seek(startTime)
       }
 
       // Buffer initial audio
@@ -301,77 +234,53 @@ export async function createPlayback(
         await bufferAudio(startTime, startTime + audioBufferAhead)
       }
 
-      // Start audio playback (audio is the master clock)
+      lastFramePts = -1
+      lastTickTime = startTime
+      setState('ready')
+      log('prepareToPlay complete')
+    },
+
+    startAudio(startTime: number): void {
+      log('startAudio', { startTime })
       if (audioScheduler) {
         audioScheduler.play(startTime)
       }
-
-      // Set up video-only timing
-      playbackStartPosition = startTime
-      playbackStartTime = performance.now()
-
       setState('playing')
-      lastFramePts = -1
-
-      // Start render loop
-      animationFrameId = requestAnimationFrame(renderLoop)
     },
 
     pause(): void {
+      log('pause', { currentState: state })
       if (state !== 'playing') return
 
-      // Save current position for resume
-      playbackStartPosition = getCurrentTime()
-
-      // Stop animation loop
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId)
-        animationFrameId = null
-      }
-
-      // Pause audio
       if (audioScheduler) {
         audioScheduler.pause()
       }
-
       setState('paused')
     },
 
     stop(): void {
-      // Stop animation loop
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId)
-        animationFrameId = null
-      }
+      log('stop', { currentState: state })
 
-      // Stop audio
       if (audioScheduler) {
         audioScheduler.stop()
       }
 
-      // Clear video buffer
       if (frameBuffer) {
         frameBuffer.clear()
       }
 
-      // Reset position
-      playbackStartPosition = 0
       lastFramePts = -1
+      lastTickTime = -1
       setState('ready')
     },
 
     async seek(time: number): Promise<void> {
+      log('seek', { time, currentState: state })
       const wasPlaying = state === 'playing'
-
-      // Stop animation loop during seek
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId)
-        animationFrameId = null
-      }
 
       setState('seeking')
 
-      // Seek video
+      // Buffer video around seek time
       if (frameBuffer) {
         await frameBuffer.seekTo(time)
       }
@@ -381,51 +290,59 @@ export async function createPlayback(
         audioScheduler.seek(time)
       }
 
-      // Reset audio decoder for clean state
+      // Reset audio decoder
       if (audioDecoder) {
         await audioDecoder.reset()
       }
 
-      // Update playback position
-      playbackStartPosition = time
       lastFramePts = -1
+      lastTickTime = time
 
-      // Resume if was playing
       if (wasPlaying) {
-        // Buffer audio before resuming
+        // Buffer audio and resume
         if (audioTrack && audioDecoder && audioScheduler) {
           await bufferAudio(time, time + audioBufferAhead)
-        }
-
-        if (audioScheduler) {
           audioScheduler.play(time)
         }
-
-        // Reset timing for video-only playback
-        playbackStartTime = performance.now()
-
         setState('playing')
-        animationFrameId = requestAnimationFrame(renderLoop)
       } else {
         setState('paused')
       }
+      log('seek complete', { finalState: state })
     },
 
-    getCurrentFrame(): VideoFrame | null {
-      if (!frameBuffer) return null
-      const time = getCurrentTime()
-      const bufferedFrame = frameBuffer.getFrame(time)
-      return bufferedFrame?.frame ?? null
-    },
+    tick(clockTime: number): VideoFrame | null {
+      if (state !== 'playing') {
+        return getFrameAtTime(clockTime)
+      }
 
-    onFrame(callback: (frame: VideoFrame | null, time: number) => void): () => void {
-      frameCallbacks.push(callback)
-      return () => {
-        const index = frameCallbacks.indexOf(callback)
-        if (index !== -1) {
-          frameCallbacks.splice(index, 1)
+      // Check for end
+      if (duration > 0 && clockTime >= duration) {
+        log('tick: reached end', { clockTime, duration })
+        setState('ended')
+        return null
+      }
+
+      // Buffer more video if needed
+      if (frameBuffer && !frameBuffer.isBufferedAt(clockTime + videoBufferAhead / 2)) {
+        frameBuffer.bufferMore()
+      }
+
+      // Buffer more audio if needed
+      if (audioScheduler && audioTrack && state === 'playing') {
+        const audioEnd = clockTime + audioBufferAhead
+        if (audioEnd > lastTickTime + audioBufferAhead / 2) {
+          bufferAudio(lastTickTime, audioEnd)
+          lastTickTime = clockTime
         }
       }
+
+      // Get current frame
+      return getFrameAtTime(clockTime)
+    },
+
+    getFrameAt(time: number): VideoFrame | null {
+      return getFrameAtTime(time)
     },
 
     onStateChange(callback: (state: PlaybackState) => void): () => void {
@@ -439,13 +356,7 @@ export async function createPlayback(
     },
 
     destroy(): void {
-      // Stop animation loop
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId)
-        animationFrameId = null
-      }
-
-      // Clean up resources
+      log('destroy')
       if (frameBuffer) {
         frameBuffer.destroy()
       }
@@ -456,9 +367,7 @@ export async function createPlayback(
         audioDecoder.close()
       }
 
-      frameCallbacks.length = 0
       stateCallbacks.length = 0
-
       setState('idle')
     },
   }

@@ -4,6 +4,9 @@ import {
   Input,
   ReadableStreamSource
 } from 'mediabunny'
+import { debug } from '@klip/utils'
+
+const log = debug('recorder', true)
 
 export interface RecordingResult {
   blob: Blob
@@ -26,6 +29,7 @@ export function createRecorder(stream: MediaStream): {
   /** Get the first decoded frame (available during recording) */
   getFirstFrame: () => VideoFrame | null
 } {
+  log('createRecorder', { videoTracks: stream.getVideoTracks().length, audioTracks: stream.getAudioTracks().length })
   const hasVideo = stream.getVideoTracks().length > 0
   const mimeType = hasVideo ? 'video/webm;codecs=vp9,opus' : 'audio/webm;codecs=opus'
 
@@ -129,6 +133,7 @@ export function createRecorder(stream: MediaStream): {
 
   return {
     start() {
+      log('start')
       chunks.length = 0
       firstFrame = null
       hasInitialized = false
@@ -142,8 +147,10 @@ export function createRecorder(stream: MediaStream): {
     },
 
     async stop(): Promise<RecordingResult> {
+      log('stop')
       return new Promise((resolve) => {
         mediaRecorder.onstop = async () => {
+          log('onstop callback')
           // Abort stream immediately (don't wait for pending operations)
           if (streamController) {
             try {
@@ -165,6 +172,7 @@ export function createRecorder(stream: MediaStream): {
           const duration = performance.now() - startTime
           const blob = new Blob(chunks, { type: mimeType })
 
+          log('recording complete', { duration, blobSize: blob.size, hasFirstFrame: !!firstFrame })
           resolve({
             blob,
             duration,
