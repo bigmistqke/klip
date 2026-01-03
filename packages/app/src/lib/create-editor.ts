@@ -239,6 +239,26 @@ export function createEditor(options: CreateEditorOptions) {
       // Stop playback and show first frames of all clips
       log('stopRecording: calling player.stop()')
       await p?.stop()
+
+      // Invalidate and trigger pre-render with new content
+      if (p) {
+        log('stopRecording: invalidating pre-render')
+        p.invalidatePreRender()
+
+        // Wait for clip to load, then pre-render
+        // (loadClip is triggered by effect when addRecording updates store)
+        log('stopRecording: scheduling pre-render')
+        setTimeout(async () => {
+          log('stopRecording: starting pre-render')
+          try {
+            await p.preRender()
+            log('stopRecording: pre-render complete')
+          } catch (err) {
+            log('stopRecording: pre-render failed', { error: err })
+          }
+        }, 500) // Give time for clip to load
+      }
+
       log('stopRecording complete')
     } finally {
       setStopRecordingPending(false)
@@ -346,7 +366,11 @@ export function createEditor(options: CreateEditorOptions) {
 
     clearRecording(index: number) {
       project.clearTrack(index)
-      player()?.clearClip(index)
+      const p = player()
+      if (p) {
+        p.clearClip(index)
+        p.invalidatePreRender()
+      }
     },
 
     setTrackVolume(index: number, value: number) {

@@ -5,13 +5,14 @@
  * Renders a 2x2 grid of video tracks.
  */
 
-import { expose } from '@bigmistqke/rpc/messenger'
+import { expose, transfer } from '@bigmistqke/rpc/messenger'
 import { compile, glsl, uniform } from '@bigmistqke/view.gl/tag'
 import { debug } from '@eddy/utils'
 import type { CompositorWorkerMethods } from './types'
 
 const log = debug('compositor-worker', false)
 
+// Configurable grid shader - supports 1x1 (bypass) up to 2x2 layouts
 const fragmentShader = glsl`
   precision mediump float;
 
@@ -20,46 +21,42 @@ const fragmentShader = glsl`
   ${uniform.sampler2D('u_video2')}
   ${uniform.sampler2D('u_video3')}
   ${uniform.vec4('u_active')}
+  ${uniform.vec2('u_grid')} // (cols, rows)
 
   varying vec2 v_uv;
 
   void main() {
     vec2 coord = v_uv * 0.5 + 0.5;
 
-    // Determine which quadrant we're in (2x2 grid)
-    int quadrant = 0;
-    vec2 localUv = coord;
+    float cols = u_grid.x;
+    float rows = u_grid.y;
 
-    if (coord.x < 0.5 && coord.y >= 0.5) {
-      // Top-left = track 0
-      quadrant = 0;
-      localUv = vec2(coord.x * 2.0, (coord.y - 0.5) * 2.0);
-    } else if (coord.x >= 0.5 && coord.y >= 0.5) {
-      // Top-right = track 1
-      quadrant = 1;
-      localUv = vec2((coord.x - 0.5) * 2.0, (coord.y - 0.5) * 2.0);
-    } else if (coord.x < 0.5 && coord.y < 0.5) {
-      // Bottom-left = track 2
-      quadrant = 2;
-      localUv = vec2(coord.x * 2.0, coord.y * 2.0);
-    } else {
-      // Bottom-right = track 3
-      quadrant = 3;
-      localUv = vec2((coord.x - 0.5) * 2.0, coord.y * 2.0);
-    }
+    // Calculate which cell we're in (row 0 = top, col 0 = left)
+    float colF = min(floor(coord.x * cols), cols - 1.0);
+    float rowF = min(floor((1.0 - coord.y) * rows), rows - 1.0);
 
-    // Flip Y for video texture
-    localUv.y = 1.0 - localUv.y;
+    int col = int(colF);
+    int row = int(rowF);
+    int cellIndex = row * int(cols) + col;
+
+    // Calculate local UV within cell
+    // Row starts at y = (rows - 1 - rowF) / rows
+    float rowStartY = (rows - 1.0 - rowF) / rows;
+    float cellX = coord.x * cols - colF;
+    float cellY = (coord.y - rowStartY) * rows;
+
+    // Flip Y for video texture sampling
+    vec2 localUv = vec2(cellX, 1.0 - cellY);
 
     vec4 color = vec4(0.1, 0.1, 0.1, 1.0);
 
-    if (quadrant == 0 && u_active.x > 0.5) {
+    if (cellIndex == 0 && u_active.x > 0.5) {
       color = texture2D(u_video0, localUv);
-    } else if (quadrant == 1 && u_active.y > 0.5) {
+    } else if (cellIndex == 1 && u_active.y > 0.5) {
       color = texture2D(u_video1, localUv);
-    } else if (quadrant == 2 && u_active.z > 0.5) {
+    } else if (cellIndex == 2 && u_active.z > 0.5) {
       color = texture2D(u_video2, localUv);
-    } else if (quadrant == 3 && u_active.w > 0.5) {
+    } else if (cellIndex == 3 && u_active.w > 0.5) {
       color = texture2D(u_video3, localUv);
     }
 
@@ -75,33 +72,45 @@ interface CompositorView {
     u_video2: { set: (value: number) => void }
     u_video3: { set: (value: number) => void }
     u_active: { set: (x: number, y: number, z: number, w: number) => void }
+    u_grid: { set: (cols: number, rows: number) => void }
   }
   attributes: {
     a_quad: { bind: () => void }
   }
 }
 
-// Worker state
+// Worker state - main canvas (visible)
 let canvas: OffscreenCanvas | null = null
 let gl: WebGL2RenderingContext | WebGLRenderingContext | null = null
 let view: CompositorView | null = null
 let program: WebGLProgram | null = null
 let textures: WebGLTexture[] = []
 
+// Capture canvas state (for pre-rendering, not visible)
+let captureCanvas: OffscreenCanvas | null = null
+let captureGl: WebGL2RenderingContext | WebGLRenderingContext | null = null
+let captureView: CompositorView | null = null
+let captureProgram: WebGLProgram | null = null
+let captureTextures: WebGLTexture[] = []
+
+// Grid configuration (1x1 = bypass, 2x2 = normal grid)
+let gridCols = 2
+let gridRows = 2
+
 // Frame sources - either from preview stream or playback
 const previewFrames: (VideoFrame | null)[] = [null, null, null, null]
 const playbackFrames: (VideoFrame | null)[] = [null, null, null, null]
 const previewReaders: (ReadableStreamDefaultReader<VideoFrame> | null)[] = [null, null, null, null]
 
-function createVideoTexture(gl: WebGL2RenderingContext | WebGLRenderingContext): WebGLTexture {
-  const texture = gl.createTexture()
+function createVideoTexture(glCtx: WebGL2RenderingContext | WebGLRenderingContext): WebGLTexture {
+  const texture = glCtx.createTexture()
   if (!texture) throw new Error('Failed to create texture')
 
-  gl.bindTexture(gl.TEXTURE_2D, texture)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+  glCtx.bindTexture(glCtx.TEXTURE_2D, texture)
+  glCtx.texParameteri(glCtx.TEXTURE_2D, glCtx.TEXTURE_WRAP_S, glCtx.CLAMP_TO_EDGE)
+  glCtx.texParameteri(glCtx.TEXTURE_2D, glCtx.TEXTURE_WRAP_T, glCtx.CLAMP_TO_EDGE)
+  glCtx.texParameteri(glCtx.TEXTURE_2D, glCtx.TEXTURE_MIN_FILTER, glCtx.LINEAR)
+  glCtx.texParameteri(glCtx.TEXTURE_2D, glCtx.TEXTURE_MAG_FILTER, glCtx.LINEAR)
 
   return texture
 }
@@ -137,6 +146,7 @@ const methods: CompositorWorkerMethods = {
   async init(offscreenCanvas: OffscreenCanvas, width: number, height: number) {
     log('init', { width, height })
 
+    // Main canvas (visible)
     canvas = offscreenCanvas
     canvas.width = width
     canvas.height = height
@@ -148,10 +158,12 @@ const methods: CompositorWorkerMethods = {
       version: gl instanceof WebGL2RenderingContext ? 'webgl2' : 'webgl',
     })
 
+    // Compile shader for main canvas
     const compiled = compile.toQuad(gl, fragmentShader)
     view = compiled.view as CompositorView
     program = compiled.program
 
+    // Create textures for main canvas
     textures = [
       createVideoTexture(gl),
       createVideoTexture(gl),
@@ -160,7 +172,28 @@ const methods: CompositorWorkerMethods = {
     ]
 
     gl.useProgram(program)
-    log('init complete')
+
+    // Capture canvas (for pre-rendering, not visible)
+    captureCanvas = new OffscreenCanvas(width, height)
+    captureGl = captureCanvas.getContext('webgl2') || captureCanvas.getContext('webgl')
+    if (!captureGl) throw new Error('WebGL not supported for capture canvas')
+
+    // Compile shader for capture canvas
+    const captureCompiled = compile.toQuad(captureGl, fragmentShader)
+    captureView = captureCompiled.view as CompositorView
+    captureProgram = captureCompiled.program
+
+    // Create textures for capture canvas
+    captureTextures = [
+      createVideoTexture(captureGl),
+      createVideoTexture(captureGl),
+      createVideoTexture(captureGl),
+      createVideoTexture(captureGl),
+    ]
+
+    captureGl.useProgram(captureProgram)
+
+    log('init complete (with capture canvas)')
   },
 
   setPreviewStream(index: number, stream: ReadableStream<VideoFrame> | null) {
@@ -192,10 +225,16 @@ const methods: CompositorWorkerMethods = {
     playbackFrames[index] = frame
   },
 
+  setGrid(cols: number, rows: number) {
+    gridCols = cols
+    gridRows = rows
+  },
+
   render() {
-    if (!gl || !view || !program || !canvas) return
+    if (!gl || !canvas || !view || !program) return
 
     gl.useProgram(program)
+    gl.viewport(0, 0, canvas.width, canvas.height)
 
     const active = [0, 0, 0, 0]
 
@@ -218,13 +257,65 @@ const methods: CompositorWorkerMethods = {
     view.uniforms.u_video2.set(2)
     view.uniforms.u_video3.set(3)
     view.uniforms.u_active.set(active[0], active[1], active[2], active[3])
+    view.uniforms.u_grid.set(gridCols, gridRows)
 
     // Bind quad attribute
     view.attributes.a_quad.bind()
 
     // Draw
-    gl.viewport(0, 0, canvas.width, canvas.height)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
+  },
+
+  // Set a frame on the capture canvas (for pre-rendering)
+  setCaptureFrame(index: number, frame: VideoFrame | null) {
+    if (!captureGl || !captureTextures[index]) return
+
+    captureGl.activeTexture(captureGl.TEXTURE0 + index)
+    captureGl.bindTexture(captureGl.TEXTURE_2D, captureTextures[index])
+
+    if (frame) {
+      captureGl.texImage2D(captureGl.TEXTURE_2D, 0, captureGl.RGBA, captureGl.RGBA, captureGl.UNSIGNED_BYTE, frame)
+      frame.close() // Close after upload
+    }
+  },
+
+  // Render to the capture canvas (for pre-rendering)
+  renderCapture(activeSlots: [number, number, number, number]) {
+    if (!captureGl || !captureCanvas || !captureView || !captureProgram) return
+
+    captureGl.useProgram(captureProgram)
+    captureGl.viewport(0, 0, captureCanvas.width, captureCanvas.height)
+
+    // Set uniforms
+    captureView.uniforms.u_video0.set(0)
+    captureView.uniforms.u_video1.set(1)
+    captureView.uniforms.u_video2.set(2)
+    captureView.uniforms.u_video3.set(3)
+    captureView.uniforms.u_active.set(activeSlots[0], activeSlots[1], activeSlots[2], activeSlots[3])
+    captureView.uniforms.u_grid.set(2, 2) // Always 2x2 for pre-render
+
+    // Bind quad attribute
+    captureView.attributes.a_quad.bind()
+
+    // Draw
+    captureGl.drawArrays(captureGl.TRIANGLES, 0, 6)
+  },
+
+  captureFrame(timestamp: number): VideoFrame | null {
+    if (!captureCanvas) return null
+
+    // Create VideoFrame from capture canvas (not visible canvas)
+    try {
+      const frame = new VideoFrame(captureCanvas, {
+        timestamp, // microseconds
+        alpha: 'discard',
+      })
+      // Transfer back to caller
+      return transfer(frame) as unknown as VideoFrame
+    } catch (e) {
+      log('captureFrame: error', { error: e })
+      return null
+    }
   },
 
   destroy() {
@@ -246,16 +337,26 @@ const methods: CompositorWorkerMethods = {
       }
     }
 
-    // Clean up WebGL resources
+    // Clean up main canvas WebGL resources
     if (gl) {
       textures.forEach(t => gl!.deleteTexture(t))
       textures = []
+    }
+
+    // Clean up capture canvas WebGL resources
+    if (captureGl) {
+      captureTextures.forEach(t => captureGl!.deleteTexture(t))
+      captureTextures = []
     }
 
     canvas = null
     gl = null
     view = null
     program = null
+    captureCanvas = null
+    captureGl = null
+    captureView = null
+    captureProgram = null
   },
 }
 

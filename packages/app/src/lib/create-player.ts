@@ -3,6 +3,7 @@ import { createAudioPipeline, type AudioPipeline } from '@eddy/mixer'
 import { createPlayback, type Playback } from '@eddy/playback'
 import { debug, getGlobalPerfMonitor } from '@eddy/utils'
 import { createCompositorWorkerWrapper, createDemuxerWorker } from '~/workers'
+import { createPreRenderer, type PreRenderer } from './create-pre-renderer'
 
 const log = debug('player', true)
 const perf = getGlobalPerfMonitor()
@@ -68,6 +69,24 @@ export interface Player {
   /** Reset performance counters */
   resetPerf(): void
 
+  /** Start pre-rendering composite video */
+  preRender(): Promise<void>
+
+  /** Cancel in-progress pre-render */
+  cancelPreRender(): void
+
+  /** Whether pre-rendered video is available */
+  readonly hasPreRender: boolean
+
+  /** Whether currently pre-rendering */
+  readonly isPreRendering: boolean
+
+  /** Pre-render progress (0-1) */
+  readonly preRenderProgress: number
+
+  /** Invalidate pre-render (call when tracks change) */
+  invalidatePreRender(): void
+
   /** Clean up all resources */
   destroy(): void
 }
@@ -106,6 +125,15 @@ export async function createPlayer(width: number, height: number): Promise<Playe
   let clockStartPosition = 0 // clockTime when playback started
   let loop = false
 
+  // Pre-render state
+  let preRenderer: PreRenderer | null = null
+  let preRenderedBlob: Blob | null = null
+  let preRenderedPlayback: Playback | null = null
+  let preRenderedDemuxer: Demuxer | null = null
+
+  // Track preview state (when any track has preview, don't use pre-render)
+  const previewActive: boolean[] = [false, false, false, false]
+
   // Track last sent frame timestamp per track to avoid redundant transfers
   // With LRU cache, getFrame() returns clones - we compare by timestamp
   const lastSentTimestamp: (number | null)[] = [null, null, null, null]
@@ -134,6 +162,9 @@ export async function createPlayer(width: number, height: number): Promise<Playe
     return max
   }
 
+  // Track last sent pre-render timestamp
+  let lastPreRenderTimestamp: number | null = null
+
   /**
    * Single render loop - drives everything
    */
@@ -156,6 +187,7 @@ export async function createPlayer(width: number, height: number): Promise<Playe
         for (let i = 0; i < NUM_TRACKS; i++) {
           lastSentTimestamp[i] = null
         }
+        lastPreRenderTimestamp = null
 
         // Reset all playbacks for loop
         for (const slot of slots) {
@@ -163,57 +195,92 @@ export async function createPlayer(width: number, height: number): Promise<Playe
             slot.playback.resetForLoop(0)
           }
         }
+        if (preRenderedPlayback) {
+          preRenderedPlayback.resetForLoop(0)
+        }
       }
     }
 
-    // Update compositor with frames from all playbacks
-    perf.start('getFrames')
-    for (let i = 0; i < NUM_TRACKS; i++) {
-      const { playback } = slots[i]
-      if (playback) {
-        // Trigger buffering when playing
-        if (isPlaying) {
-          playback.tick(time)
+    // Check if any preview is active (recording mode)
+    const hasActivePreview = previewActive.some(active => active)
+
+    // Use pre-rendered video if available and no preview active (1x1 grid mode)
+    if (preRenderedPlayback && !hasActivePreview) {
+      perf.start('getPreRenderFrame')
+
+      // Trigger buffering when playing
+      if (isPlaying) {
+        preRenderedPlayback.tick(time)
+      }
+
+      const frameTimestamp = preRenderedPlayback.getFrameTimestamp(time)
+
+      if (frameTimestamp !== null && frameTimestamp !== lastPreRenderTimestamp) {
+        const frame = preRenderedPlayback.getFrameAt(time)
+        if (frame) {
+          compositor.setGrid(1, 1)
+          compositor.setFrame(0, frame)
+          lastPreRenderTimestamp = frameTimestamp
+          perf.increment('prerender-frame-sent')
         }
+      } else if (frameTimestamp === lastPreRenderTimestamp) {
+        perf.increment('prerender-frame-reused')
+      }
 
-        // Check what frame timestamp would be returned (without fetching)
-        const frameTimestamp = playback.getFrameTimestamp(time)
+      perf.end('getPreRenderFrame')
+    } else {
+      // Use 2x2 grid mode with individual track playbacks
+      compositor.setGrid(2, 2)
 
-        // Handle null frames (past duration or no video)
-        if (frameTimestamp === null) {
-          if (lastSentTimestamp[i] !== null) {
-            lastSentTimestamp[i] = null
-            compositor.setFrame(i, null)
-            perf.increment(`frame-miss-${i}`)
+      // Update compositor with frames from all playbacks
+      perf.start('getFrames')
+      for (let i = 0; i < NUM_TRACKS; i++) {
+        const { playback } = slots[i]
+        if (playback) {
+          // Trigger buffering when playing
+          if (isPlaying) {
+            playback.tick(time)
           }
-          continue
+
+          // Check what frame timestamp would be returned (without fetching)
+          const frameTimestamp = playback.getFrameTimestamp(time)
+
+          // Handle null frames (past duration or no video)
+          if (frameTimestamp === null) {
+            if (lastSentTimestamp[i] !== null) {
+              lastSentTimestamp[i] = null
+              compositor.setFrame(i, null)
+              perf.increment(`frame-miss-${i}`)
+            }
+            continue
+          }
+
+          // Same frame as before - compositor already has it, skip entirely
+          if (frameTimestamp === lastSentTimestamp[i]) {
+            perf.increment('frame-reused')
+            continue
+          }
+
+          // New frame needed - get it (clones from cache)
+          perf.start(`getFrame-${i}`)
+          const frame = playback.getFrameAt(time)
+          perf.end(`getFrame-${i}`)
+
+          if (!frame) {
+            perf.increment(`frame-miss-${i}`)
+            continue
+          }
+
+          // Transfer to compositor
+          lastSentTimestamp[i] = frameTimestamp
+          perf.start(`setFrame-${i}`)
+          compositor.setFrame(i, frame)
+          perf.end(`setFrame-${i}`)
+          perf.increment('frame-sent')
         }
-
-        // Same frame as before - compositor already has it, skip entirely
-        if (frameTimestamp === lastSentTimestamp[i]) {
-          perf.increment('frame-reused')
-          continue
-        }
-
-        // New frame needed - get it (clones from cache)
-        perf.start(`getFrame-${i}`)
-        const frame = playback.getFrameAt(time)
-        perf.end(`getFrame-${i}`)
-
-        if (!frame) {
-          perf.increment(`frame-miss-${i}`)
-          continue
-        }
-
-        // Transfer to compositor
-        lastSentTimestamp[i] = frameTimestamp
-        perf.start(`setFrame-${i}`)
-        compositor.setFrame(i, frame)
-        perf.end(`setFrame-${i}`)
-        perf.increment('frame-sent')
       }
+      perf.end('getFrames')
     }
-    perf.end('getFrames')
 
     // Render the compositor
     perf.start('compositor.render')
@@ -327,6 +394,7 @@ export async function createPlayer(width: number, height: number): Promise<Playe
     },
 
     setPreviewSource(trackIndex: number, stream: MediaStream | null): void {
+      previewActive[trackIndex] = stream !== null
       compositor.setPreviewStream(trackIndex, stream)
     },
 
@@ -458,8 +526,101 @@ export async function createPlayer(width: number, height: number): Promise<Playe
       perf.reset()
     },
 
+    async preRender(): Promise<void> {
+      if (preRenderer?.isRendering) {
+        log('preRender: already in progress')
+        return
+      }
+
+      // Get all playbacks
+      const playbacks = slots.map(s => s.playback)
+      const hasAnyClip = playbacks.some(p => p !== null)
+      if (!hasAnyClip) {
+        log('preRender: no clips to render')
+        return
+      }
+
+      log('preRender: starting')
+
+      // Create pre-renderer
+      preRenderer = createPreRenderer(playbacks, compositor)
+
+      try {
+        const result = await preRenderer.render()
+        log('preRender: complete', { blobSize: result.blob.size, frameCount: result.frameCount })
+
+        // Store the pre-rendered blob
+        preRenderedBlob = result.blob
+
+        // Create playback for pre-rendered video
+        if (preRenderedDemuxer) {
+          preRenderedDemuxer.destroy()
+        }
+        if (preRenderedPlayback) {
+          preRenderedPlayback.destroy()
+        }
+
+        preRenderedDemuxer = await createDemuxerWorker(preRenderedBlob)
+        preRenderedPlayback = await createPlayback(preRenderedDemuxer)
+
+        // Buffer first frame
+        await preRenderedPlayback.seek(0)
+
+        log('preRender: playback ready')
+      } catch (err) {
+        log('preRender: error', { error: err })
+        throw err
+      }
+    },
+
+    cancelPreRender(): void {
+      if (preRenderer?.isRendering) {
+        preRenderer.cancel()
+        log('preRender: cancelled')
+      }
+    },
+
+    get hasPreRender(): boolean {
+      return preRenderedPlayback !== null
+    },
+
+    get isPreRendering(): boolean {
+      return preRenderer?.isRendering ?? false
+    },
+
+    get preRenderProgress(): number {
+      return preRenderer?.progress ?? 0
+    },
+
+    invalidatePreRender(): void {
+      if (preRenderedPlayback) {
+        preRenderedPlayback.destroy()
+        preRenderedPlayback = null
+      }
+      if (preRenderedDemuxer) {
+        preRenderedDemuxer.destroy()
+        preRenderedDemuxer = null
+      }
+      preRenderedBlob = null
+      lastPreRenderTimestamp = null
+      // Switch back to 2x2 grid
+      compositor.setGrid(2, 2)
+      log('preRender: invalidated')
+    },
+
     destroy(): void {
       stopRenderLoop()
+
+      // Clean up pre-render
+      if (preRenderer?.isRendering) {
+        preRenderer.cancel()
+      }
+      if (preRenderedPlayback) {
+        preRenderedPlayback.destroy()
+      }
+      if (preRenderedDemuxer) {
+        preRenderedDemuxer.destroy()
+      }
 
       for (let i = 0; i < NUM_TRACKS; i++) {
         const slot = slots[i]

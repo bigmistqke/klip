@@ -18,6 +18,22 @@
   z-index: 100;
 }
 
+.preRenderProgress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 99;
+}
+
+.preRenderProgressBar {
+  height: 100%;
+  background: #3b82f6;
+  transition: width 0.1s ease-out;
+}
+
 .transport {
   display: grid;
   grid-template-columns: auto auto auto auto auto auto;

@@ -19,8 +19,20 @@ export interface WorkerCompositor {
   /** Set a playback frame for a track slot */
   setFrame(index: number, frame: VideoFrame | null): void
 
-  /** Render current state */
+  /** Set grid layout (1x1 = full-screen single video, 2x2 = quad view) */
+  setGrid(cols: number, rows: number): void
+
+  /** Render current state to visible canvas */
   render(): void
+
+  /** Set a frame on capture canvas (for pre-rendering, doesn't affect visible canvas) */
+  setCaptureFrame(index: number, frame: VideoFrame | null): void
+
+  /** Render to capture canvas (for pre-rendering, doesn't affect visible canvas) */
+  renderCapture(activeSlots: [number, number, number, number]): void
+
+  /** Capture frame from capture canvas as VideoFrame */
+  captureFrame(timestamp: number): Promise<VideoFrame | null>
 
   /** Clean up resources */
   destroy(): void
@@ -99,8 +111,29 @@ export async function createCompositorWorkerWrapper(
       }
     },
 
+    setGrid(cols: number, rows: number): void {
+      handle.rpc.setGrid(cols, rows)
+    },
+
     render() {
       handle.rpc.render()
+    },
+
+    setCaptureFrame(index: number, frame: VideoFrame | null): void {
+      // Transfer frame to worker for capture canvas
+      if (frame) {
+        handle.rpc.setCaptureFrame(index, transfer(frame) as unknown as VideoFrame)
+      } else {
+        handle.rpc.setCaptureFrame(index, null)
+      }
+    },
+
+    renderCapture(activeSlots: [number, number, number, number]): void {
+      handle.rpc.renderCapture(activeSlots)
+    },
+
+    async captureFrame(timestamp: number): Promise<VideoFrame | null> {
+      return handle.rpc.captureFrame(timestamp)
     },
 
     destroy() {
