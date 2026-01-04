@@ -1,7 +1,7 @@
 import { FiCircle, FiPause, FiPlay, FiRepeat, FiSquare, FiUpload, FiVolume2 } from 'solid-icons/fi'
 import { type Component, For, Show } from 'solid-js'
 import { useAuth } from '~/lib/atproto/auth-context'
-import { createEditor } from '~/lib/create-editor'
+import { createEditor } from '~/hooks'
 import styles from './Editor.module.css'
 import { Track } from './Track'
 
@@ -64,11 +64,11 @@ export const Editor: Component<EditorProps> = props => {
         <button
           type="button"
           class={styles.playButton}
-          data-playing={editor.player()?.isPlaying ?? false}
+          data-playing={editor.player()?.isPlaying() ?? false}
           onClick={editor.playPause}
           disabled={editor.isRecording() || editor.selectedTrack() !== null}
         >
-          {editor.player()?.isPlaying ? <FiPause size={20} /> : <FiPlay size={20} />}
+          {editor.player()?.isPlaying() ? <FiPause size={20} /> : <FiPlay size={20} />}
         </button>
         <button
           type="button"
@@ -119,7 +119,7 @@ export const Editor: Component<EditorProps> = props => {
           onClick={editor.publish}
           disabled={
             editor.isRecording() ||
-            (editor.player()?.isPlaying ?? false) ||
+            (editor.player()?.isPlaying() ?? false) ||
             editor.isPublishing() ||
             !editor.hasAnyRecording() ||
             !agent()
@@ -135,7 +135,7 @@ export const Editor: Component<EditorProps> = props => {
             <Track
               id={id}
               hasClip={editor.player()?.hasClip(id) ?? false}
-              isPlaying={editor.player()?.isPlaying ?? false}
+              isPlaying={editor.player()?.isPlaying() ?? false}
               isSelected={editor.selectedTrack() === id}
               isRecording={editor.isRecording() && editor.selectedTrack() === id}
               isLoading={editor.previewPending() && editor.selectedTrack() === id}

@@ -79,6 +79,57 @@ Each group type has a matching member type (`member.absolute`, `member.grid`, `m
 
 - **Use CSS Grid for all layouts** - Prefer `display: grid` over flexbox for layout purposes
 
+## SolidJS Conventions
+
+- **Signal access** - When reading signal values, always assign to a local const with underscore prefix:
+  ```ts
+  // Good
+  const _player = player()
+  if (!_player) return
+  _player.play()
+
+  // Bad - calling signal multiple times
+  if (!player()) return
+  player().play()
+  ```
+
+- **No single-character variables** - Always use descriptive names:
+  ```ts
+  // Good
+  for (const playback of playbacks) { ... }
+  const _player = player()
+  const link = document.createElement('a')
+
+  // Bad
+  for (const p of playbacks) { ... }
+  const p = player()
+  const a = document.createElement('a')
+  ```
+
+- **solid-whenever** - Use `@bigmistqke/solid-whenever` for reactive guards:
+  ```ts
+  import { whenEffect, whenMemo } from '@bigmistqke/solid-whenever'
+
+  // Good - effect only runs when player is truthy
+  whenEffect(player, player => {
+    player.play()
+  })
+
+  // Good - memo with fallback when player is null
+  const hasClip = whenMemo(
+    player,
+    player => player.hasClip(0),
+    () => false
+  )
+
+  // Bad - manual null check in effect
+  createEffect(() => {
+    const player = player()
+    if (!player) return
+    player.play()
+  })
+  ```
+
 ## Workflow
 
 - **Tickets** - A ticket is a single task. After completing a ticket, ask the user to confirm before proceeding
