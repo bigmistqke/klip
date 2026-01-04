@@ -3,7 +3,7 @@ import { createAudioPipeline, type AudioPipeline } from '@eddy/mixer'
 import { createPlayback, type Playback } from '@eddy/playback'
 import { debug, getGlobalPerfMonitor } from '@eddy/utils'
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
-import { createStore, produce } from 'solid-js/store'
+import { createStore } from 'solid-js/store'
 import { createCompositorWorkerWrapper, createDemuxerWorker } from '~/workers'
 import type { WorkerCompositor } from '~/workers/create-compositor-worker'
 import { createClock, type Clock } from './create-clock'
@@ -114,7 +114,6 @@ export async function createPlayer(width: number, height: number): Promise<Playe
 
   // Frame tracking for optimization
   const lastSentTimestamp: (number | null)[] = [null, null, null, null]
-  let lastPreRenderTimestamp: number | null = null
 
   // Compute max duration from slots
   function updateMaxDuration() {
@@ -136,7 +135,7 @@ export async function createPlayer(width: number, height: number): Promise<Playe
 
     const time = clock.tick()
     const playing = clock.isPlaying()
-    const preRenderedPlayback = preRenderer.playback()
+    const hasPreRender = preRenderer.hasPreRender()
 
     // Handle loop reset
     if (playing && clock.loop() && maxDuration() > 0 && time >= maxDuration()) {
@@ -144,7 +143,6 @@ export async function createPlayer(width: number, height: number): Promise<Playe
       for (let i = 0; i < NUM_TRACKS; i++) {
         lastSentTimestamp[i] = null
       }
-      lastPreRenderTimestamp = null
 
       // Reset all playbacks for loop
       for (const slot of slots) {
@@ -152,36 +150,25 @@ export async function createPlayer(width: number, height: number): Promise<Playe
           slot.playback.resetForLoop(0)
         }
       }
-      if (preRenderedPlayback) {
-        preRenderedPlayback.resetForLoop(0)
-      }
+      preRenderer.resetForLoop(0)
     }
 
     // Tick individual playbacks for audio when using pre-render for video
-    if (preRenderedPlayback && playing) {
+    if (hasPreRender && playing) {
       for (let i = 0; i < NUM_TRACKS; i++) {
         slots[i].playback?.tick(time, false) // audio only
       }
     }
 
     // Use pre-rendered video if available
-    if (preRenderedPlayback) {
+    if (hasPreRender) {
       perf.start('getPreRenderFrame')
 
-      if (playing) {
-        preRenderedPlayback.tick(time)
-      }
-
-      const frameTimestamp = preRenderedPlayback.getFrameTimestamp(time)
-
-      if (frameTimestamp !== null && frameTimestamp !== lastPreRenderTimestamp) {
-        const frame = preRenderedPlayback.getFrameAt(time)
-        if (frame) {
-          compositor.setGrid(1, 1)
-          compositor.setFrame(0, frame)
-          lastPreRenderTimestamp = frameTimestamp
-          perf.increment('prerender-frame-sent')
-        }
+      const frame = preRenderer.tick(time, playing)
+      if (frame) {
+        compositor.setGrid(1, 1)
+        compositor.setFrame(0, frame)
+        perf.increment('prerender-frame-sent')
       }
 
       perf.end('getPreRenderFrame')

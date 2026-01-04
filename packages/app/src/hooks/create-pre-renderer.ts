@@ -15,7 +15,7 @@ import {
   VideoSampleSource,
   WebMOutputFormat,
 } from 'mediabunny'
-import { createSignal, onCleanup, type Accessor } from 'solid-js'
+import { createResource, createSignal, onCleanup, type Accessor } from 'solid-js'
 import { createDemuxerWorker } from '~/workers'
 import type { WorkerCompositor } from '~/workers/create-compositor-worker'
 
@@ -26,6 +26,17 @@ export interface PreRenderOptions {
   fps?: number
   /** Video bitrate in bps (default: 4_000_000) */
   bitrate?: number
+}
+
+interface RenderParams {
+  playbacks: (Playback | null)[]
+  compositor: WorkerCompositor
+}
+
+interface RenderResult {
+  blob: Blob
+  playback: Playback
+  demuxer: Demuxer
 }
 
 export interface PreRendererState {
@@ -43,11 +54,15 @@ export interface PreRendererState {
 
 export interface PreRendererActions {
   /** Start pre-rendering from the given playbacks */
-  render: (playbacks: (Playback | null)[], compositor: WorkerCompositor) => Promise<void>
+  render: (playbacks: (Playback | null)[], compositor: WorkerCompositor) => void
   /** Cancel in-progress pre-render */
   cancel: () => void
   /** Invalidate and clear pre-rendered content */
   invalidate: () => void
+  /** Tick the pre-rendered playback and return frame if new */
+  tick: (time: number, playing: boolean) => VideoFrame | null
+  /** Reset playback for loop */
+  resetForLoop: (time: number) => void
 }
 
 export type PreRenderer = PreRendererState & PreRendererActions
@@ -60,60 +75,33 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   const bitrate = options.bitrate ?? 4_000_000
   const frameDuration = 1 / fps
 
-  // Signals for reactive state
-  const [isRendering, setIsRendering] = createSignal(false)
+  // Render params signal - setting this triggers the resource
+  const [renderParams, setRenderParams] = createSignal<RenderParams | null>(null)
+
+  // Progress needs separate tracking (createResource doesn't support progress)
   const [progress, setProgress] = createSignal(0)
-  const [blob, setBlob] = createSignal<Blob | null>(null)
-  const [playback, setPlayback] = createSignal<Playback | null>(null)
 
-  // Internal state (not reactive)
-  let isCancelled = false
-  let demuxer: Demuxer | null = null
+  // Frame tracking for tick()
+  let lastSentTimestamp: number | null = null
 
-  // Derived state
-  const hasPreRender = () => playback() !== null
+  // AbortController - stored outside so cancel() can access it
+  let abortController: AbortController | null = null
 
-  // Cleanup on disposal
-  onCleanup(() => {
-    invalidate()
-  })
-
-  function invalidate() {
-    const currentPlayback = playback()
-    if (currentPlayback) {
-      currentPlayback.destroy()
-      setPlayback(null)
+  // The render resource
+  const [result, { mutate }] = createResource(renderParams, async (params, { refetching }): Promise<RenderResult | null> => {
+    // Abort previous render if refetching
+    if (refetching && abortController) {
+      abortController.abort()
+      log('aborted previous render')
     }
-    if (demuxer) {
-      demuxer.destroy()
-      demuxer = null
-    }
-    setBlob(null)
-    setProgress(0)
-    log('invalidated')
-  }
 
-  function cancel() {
-    if (isRendering()) {
-      isCancelled = true
-      log('cancel requested')
-    }
-  }
-
-  async function render(
-    playbacks: (Playback | null)[],
-    compositor: WorkerCompositor,
-  ): Promise<void> {
-    if (isRendering()) {
-      log('render: already in progress')
-      return
-    }
+    const { playbacks, compositor } = params
 
     // Check if there's content to render
-    const hasContent = playbacks.some(p => p !== null)
+    const hasContent = playbacks.some(playback => playback !== null)
     if (!hasContent) {
       log('render: no content')
-      return
+      return null
     }
 
     // Find max duration
@@ -126,14 +114,11 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
 
     if (duration <= 0) {
       log('render: no duration')
-      return
+      return null
     }
 
-    // Clear any existing pre-render
-    invalidate()
-
-    setIsRendering(true)
-    isCancelled = false
+    abortController = new AbortController()
+    const { signal } = abortController
     setProgress(0)
 
     const totalFrames = Math.ceil(duration * fps)
@@ -159,17 +144,17 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
 
       // Seek all playbacks to start
       const seekPromises = playbacks
-        .filter((p): p is Playback => p !== null)
-        .map(p => p.seek(0))
+        .filter((playback): playback is Playback => playback !== null)
+        .map(playback => playback.seek(0))
       await Promise.all(seekPromises)
 
       let frameCount = 0
 
       // Render each frame
       for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-        if (isCancelled) {
+        if (signal.aborted) {
           log('cancelled at frame', frameIndex)
-          break
+          return null
         }
 
         const time = frameIndex * frameDuration
@@ -218,35 +203,100 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
         }
       }
 
-      if (!isCancelled) {
-        // Close and finalize
-        await videoSource.close()
-        await output.finalize()
+      // Close and finalize
+      await videoSource.close()
+      await output.finalize()
 
-        const buffer = bufferTarget.buffer
-        const renderedBlob = buffer ? new Blob([buffer], { type: 'video/webm' }) : new Blob()
+      const buffer = bufferTarget.buffer
+      const renderedBlob = buffer ? new Blob([buffer], { type: 'video/webm' }) : new Blob()
 
-        log('complete', { frameCount, blobSize: renderedBlob.size })
+      log('complete', { frameCount, blobSize: renderedBlob.size })
 
-        // Create playback for the pre-rendered video
-        setBlob(renderedBlob)
-        demuxer = await createDemuxerWorker(renderedBlob)
-        const renderedPlayback = await createPlayback(demuxer)
-        await renderedPlayback.seek(0)
-        setPlayback(renderedPlayback)
+      // Create playback for the pre-rendered video
+      const demuxer = await createDemuxerWorker(renderedBlob)
+      const renderedPlayback = await createPlayback(demuxer)
+      await renderedPlayback.seek(0)
 
-        log('playback ready')
-      }
+      setProgress(1)
+      log('playback ready')
+
+      return { blob: renderedBlob, playback: renderedPlayback, demuxer }
     } catch (err) {
       log('error', { error: err })
       throw err
     } finally {
-      setIsRendering(false)
-      if (!isCancelled) {
-        setProgress(1)
-      }
+      abortController = null
+    }
+  })
+
+  // Derived state from resource
+  const isRendering = () => result.loading
+  const hasPreRender = () => result() !== null && result() !== undefined
+  const playback = () => result()?.playback ?? null
+  const blob = () => result()?.blob ?? null
+
+  function invalidate() {
+    const _result = result()
+    if (_result) {
+      _result.playback.destroy()
+      _result.demuxer.destroy()
+    }
+    mutate(null)
+    setProgress(0)
+    lastSentTimestamp = null
+    log('invalidated')
+  }
+
+  function cancel() {
+    if (abortController) {
+      abortController.abort()
+      log('cancel requested')
     }
   }
+
+  function render(playbacks: (Playback | null)[], compositor: WorkerCompositor) {
+    // Clear any existing pre-render first
+    invalidate()
+    // Trigger the resource by setting new params
+    setRenderParams({ playbacks, compositor })
+  }
+
+  function tick(time: number, playing: boolean): VideoFrame | null {
+    const _playback = playback()
+    if (!_playback) return null
+
+    if (playing) {
+      _playback.tick(time)
+    }
+
+    const frameTimestamp = _playback.getFrameTimestamp(time)
+
+    if (frameTimestamp === null || frameTimestamp === lastSentTimestamp) {
+      return null
+    }
+
+    const frame = _playback.getFrameAt(time)
+    if (frame) {
+      lastSentTimestamp = frameTimestamp
+      return frame
+    }
+
+    return null
+  }
+
+  function resetForLoop(time: number) {
+    const _playback = playback()
+    if (_playback) {
+      _playback.resetForLoop(time)
+    }
+    lastSentTimestamp = null
+  }
+
+  // Cleanup on disposal
+  onCleanup(() => {
+    cancel()
+    invalidate()
+  })
 
   return {
     // State
@@ -259,5 +309,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
     render,
     cancel,
     invalidate,
+    tick,
+    resetForLoop,
   }
 }

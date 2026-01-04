@@ -273,9 +273,9 @@ export function createEditor(options: CreateEditorOptions) {
       if (_player) {
         _player.preRenderer.invalidate()
 
-        setTimeout(async () => {
+        setTimeout(() => {
           const playbacks = [0, 1, 2, 3].map(i => _player.getSlot(i).playback)
-          await _player.preRenderer.render(playbacks, _player.compositor)
+          _player.preRenderer.render(playbacks, _player.compositor)
         }, 500)
       }
     } finally {
