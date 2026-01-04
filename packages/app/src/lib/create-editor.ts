@@ -84,6 +84,20 @@ export function createEditor(options: CreateEditorOptions) {
           }
           return states
         },
+        downloadPreRender: () => {
+          const blob = p.preRenderedBlob
+          if (!blob) {
+            console.log('No pre-rendered video available')
+            return
+          }
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = 'prerender.webm'
+          a.click()
+          URL.revokeObjectURL(url)
+          console.log('Downloaded prerender.webm', { size: blob.size })
+        },
       }
 
       setPlayer(p)

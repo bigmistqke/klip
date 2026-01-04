@@ -26,7 +26,7 @@ export interface WorkerCompositor {
   render(): void
 
   /** Set a frame on capture canvas (for pre-rendering, doesn't affect visible canvas) */
-  setCaptureFrame(index: number, frame: VideoFrame | null): void
+  setCaptureFrame(index: number, frame: VideoFrame | null): Promise<void>
 
   /** Render to capture canvas (for pre-rendering, doesn't affect visible canvas) */
   renderCapture(activeSlots: [number, number, number, number]): void
@@ -119,13 +119,8 @@ export async function createCompositorWorkerWrapper(
       handle.rpc.render()
     },
 
-    setCaptureFrame(index: number, frame: VideoFrame | null): void {
-      // Transfer frame to worker for capture canvas
-      if (frame) {
-        handle.rpc.setCaptureFrame(index, transfer(frame) as unknown as VideoFrame)
-      } else {
-        handle.rpc.setCaptureFrame(index, null)
-      }
+    setCaptureFrame(index: number, frame: VideoFrame | null): Promise<void> {
+      return handle.rpc.setCaptureFrame(index, frame ? transfer(frame) : null)
     },
 
     renderCapture(activeSlots: [number, number, number, number]): void {

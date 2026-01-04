@@ -86,8 +86,9 @@ export interface Playback {
    * Buffers more content as needed, schedules audio
    * Does NOT return a frame - use getFrameTimestamp/takeFrameAt for borrow model
    * @param clockTime - Current time from master clock
+   * @param bufferVideo - Whether to buffer video (default true). Set false for audio-only playback.
    */
-  tick(clockTime: number): void
+  tick(clockTime: number, bufferVideo?: boolean): void
 
   /**
    * Get frame at specific time (for static display, clones from cache)
@@ -354,7 +355,7 @@ export async function createPlayback(
       log('seek complete', { finalState: state })
     },
 
-    tick(clockTime: number): void {
+    tick(clockTime: number, bufferVideo = true): void {
       if (state !== 'playing') {
         return
       }
@@ -367,7 +368,7 @@ export async function createPlayback(
       }
 
       // Buffer more video if needed
-      if (frameBuffer && !frameBuffer.isBufferedAt(clockTime + videoBufferAhead / 2)) {
+      if (bufferVideo && frameBuffer && !frameBuffer.isBufferedAt(clockTime + videoBufferAhead / 2)) {
         frameBuffer.bufferMore()
       }
 

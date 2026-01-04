@@ -67,7 +67,7 @@ export interface FrameCache {
  *
  * @param maxFrames - Maximum number of frames to keep (default: 1024)
  */
-export function createFrameCache(maxFrames: number = 1024 * 4): FrameCache {
+export function createFrameCache(maxFrames: number = 1024 * 8): FrameCache {
   // Map preserves insertion order - we use delete+set to move to end (most recent)
   const cache = new Map<FrameKey, CacheEntry>()
 

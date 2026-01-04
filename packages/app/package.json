@@ -10,7 +10,7 @@
   "dependencies": {
     "@atproto/api": "^0.13.0",
     "@atproto/oauth-client-browser": "^0.3.0",
-    "@bigmistqke/rpc": "^0.1.2",
+    "@bigmistqke/rpc": "link:../../../rpc",
     "@bigmistqke/solid-whenever": "^0.1.1",
     "@bigmistqke/view.gl": "^0.1.9",
     "@eddy/codecs": "workspace:*",

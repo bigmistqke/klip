@@ -97,8 +97,9 @@ export function createPreRenderer(
     })
 
     const videoSource = new VideoSampleSource({
-      codec: 'vp9',
+      codec: 'vp8',
       bitrate,
+      keyFrameInterval: 30, // Keyframe every 30 frames (1 second at 30fps)
     })
     output.addVideoTrack(videoSource)
 
@@ -132,16 +133,25 @@ export function createPreRenderer(
         for (let i = 0; i < playbacks.length; i++) {
           const playback = playbacks[i]
           if (playback) {
+            // Ensure frames are buffered at this time
+            const frameTimestamp = playback.getFrameTimestamp(time)
+            if (frameTimestamp === null) {
+              // Need to seek to buffer this region
+              await playback.seek(time)
+            }
+
             const frame = playback.getFrameAt(time)
             if (frame) {
-              compositor.setCaptureFrame(i, frame)
+              await compositor.setCaptureFrame(i, frame)
               activeSlots[i] = 1
+            } else {
+              log('no frame at time', { i, time, frameIndex })
             }
           }
         }
 
         // Render to capture canvas (doesn't affect visible canvas)
-        compositor.renderCapture(activeSlots)
+        await compositor.renderCapture(activeSlots)
 
         // Capture the rendered frame
         const capturedFrame = await compositor.captureFrame(timestampMicros)
@@ -153,9 +163,14 @@ export function createPreRenderer(
           sample[Symbol.dispose]?.()
           capturedFrame.close()
           frameCount++
+        } else {
+          log('captureFrame returned null', { frameIndex, time })
         }
 
         progress = (frameIndex + 1) / totalFrames
+
+        // Log every frame for debugging
+        log('frame', { frameIndex, time, frameCount, activeSlots })
 
         // Log progress periodically
         if (frameCount % 30 === 0 || frameIndex === totalFrames - 1) {
@@ -166,6 +181,9 @@ export function createPreRenderer(
           })
         }
       }
+
+      // Close video source to signal no more samples
+      await videoSource.close()
 
       // Finalize
       await output.finalize()

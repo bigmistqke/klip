@@ -87,6 +87,9 @@ export interface Player {
   /** Invalidate pre-render (call when tracks change) */
   invalidatePreRender(): void
 
+  /** Get pre-rendered blob (for debugging) */
+  readonly preRenderedBlob: Blob | null
+
   /** Clean up all resources */
   destroy(): void
 }
@@ -203,6 +206,16 @@ export async function createPlayer(width: number, height: number): Promise<Playe
 
     // Check if any preview is active (recording mode)
     const hasActivePreview = previewActive.some(active => active)
+
+    // Tick individual playbacks for audio only when using pre-render for video
+    if (preRenderedPlayback && isPlaying) {
+      for (let i = 0; i < NUM_TRACKS; i++) {
+        const { playback } = slots[i]
+        if (playback) {
+          playback.tick(time, false) // audio only, skip video buffering
+        }
+      }
+    }
 
     // Use pre-rendered video if available (1x1 grid as background)
     if (preRenderedPlayback) {
@@ -403,7 +416,7 @@ export async function createPlayer(width: number, height: number): Promise<Playe
       const startTime = time ?? clockTime
       log('play', { startTime, numPlaybacks: slots.filter(s => s.playback).length })
 
-      // Prepare all playbacks
+      // Prepare all playbacks (including pre-rendered)
       const preparePromises: Promise<void>[] = []
       for (let i = 0; i < slots.length; i++) {
         const slot = slots[i]
@@ -411,6 +424,10 @@ export async function createPlayer(width: number, height: number): Promise<Playe
           log('play: preparing playback', { trackIndex: i })
           preparePromises.push(slot.playback.prepareToPlay(startTime))
         }
+      }
+      if (preRenderedPlayback) {
+        log('play: preparing pre-rendered playback')
+        preparePromises.push(preRenderedPlayback.prepareToPlay(startTime))
       }
       await Promise.all(preparePromises)
 
@@ -591,6 +608,10 @@ export async function createPlayer(width: number, height: number): Promise<Playe
 
     get preRenderProgress(): number {
       return preRenderer?.progress ?? 0
+    },
+
+    get preRenderedBlob(): Blob | null {
+      return preRenderedBlob
     },
 
     invalidatePreRender(): void {

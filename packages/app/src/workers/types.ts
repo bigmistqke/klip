@@ -2,6 +2,7 @@
  * Shared RPC type definitions for worker communication
  */
 
+import type { Transferred } from '@bigmistqke/rpc/messenger'
 import type { DemuxedSample, DemuxerInfo } from '@eddy/codecs'
 
 // ============================================================================
@@ -94,7 +95,7 @@ export interface CompositorWorkerMethods {
   render(): void
 
   /** Set a frame on capture canvas (for pre-rendering, doesn't affect visible canvas) */
-  setCaptureFrame(index: number, frame: VideoFrame | null): void
+  setCaptureFrame(index: number, frame: Transferred<VideoFrame> | null): void
 
   /** Render to capture canvas (for pre-rendering, doesn't affect visible canvas) */
   renderCapture(activeSlots: [number, number, number, number]): void
