@@ -55,7 +55,7 @@ export default function Debug() {
   })
 
   // Recording action
-  const record = action(async (_: undefined, { signal, onCleanup }) => {
+  const record = action(async (_: undefined, { signal, onCleanup, cancellation }) => {
     const _workers = workers()
     if (!_workers) throw new Error('Workers not ready')
 
@@ -91,10 +91,8 @@ export default function Debug() {
 
     addLog('recording...')
 
-    // Wait until cancelled via abort signal
-    await new Promise<void>((_, reject) => {
-      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true })
-    })
+    // Wait until cancelled
+    await cancellation
   })
 
   // Finalize and download

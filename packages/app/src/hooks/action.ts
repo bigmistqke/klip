@@ -11,6 +11,8 @@ export interface ActionContext {
   signal: AbortSignal
   /** Register a cleanup function to be called when action is cancelled/cleared/replaced */
   onCleanup: (fn: () => void) => void
+  /** Promise that resolves when the action is cancelled - useful for "run until cancelled" actions */
+  readonly cancellation: Promise<void>
 }
 
 export type ActionFetcher<T, R> = (args: T, context: ActionContext) => Promise<R>
@@ -94,8 +96,20 @@ export function action<T = undefined, R = void>(fetcher: ActionFetcher<T, R>): A
     setPending(true)
     setError(undefined)
 
+    // Context with lazy cached cancellation promise
+    let cancellationPromise: Promise<void> | null = null
+    const context: ActionContext = {
+      signal,
+      onCleanup: registerCleanup,
+      get cancellation() {
+        return (cancellationPromise ??= new Promise<void>(resolve => {
+          signal.addEventListener('abort', () => resolve(), { once: true })
+        }))
+      },
+    }
+
     try {
-      const value = await fetcher(args as T, { signal, onCleanup: registerCleanup })
+      const value = await fetcher(args as T, context)
 
       if (signal.aborted) {
         throw new CancelledError()
