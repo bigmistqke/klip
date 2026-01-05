@@ -4,14 +4,13 @@
  * Manages all pre-render state with signals and handles the pre-rendered playback lifecycle.
  */
 
-import { every } from '@bigmistqke/solid-whenever'
 import type { Demuxer } from '@eddy/codecs'
 import type { Playback } from '@eddy/playback'
 import { createPlayback } from '@eddy/playback'
 import { debug } from '@eddy/utils'
 import { BufferTarget, Output, VideoSample, VideoSampleSource, WebMOutputFormat } from 'mediabunny'
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
-import { createCancellableResource } from '~/lib/create-cancellable-resource'
+import { createAction } from '~/lib/create-action'
 import { createDemuxerWorker } from '~/workers'
 import type { WorkerCompositor } from '~/workers/create-compositor-worker'
 
@@ -74,29 +73,30 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   const frameDuration = 1 / fps
   const duration = options.duration ?? (() => 0)
 
-  // Render params signal - setting this triggers the resource
-  const [renderParams, setRenderParams] = createSignal<RenderParams | null>(null)
-
-  // Progress needs separate tracking (createResource doesn't support progress)
+  // Progress tracking
   const [progress, setProgress] = createSignal(0)
 
   // Frame tracking for tick()
   let lastSentTimestamp: number | null = null
 
+  // The render action
+  const renderAction = createAction<RenderParams, RenderResult | null>(
+    async ({ playbacks, compositor }, { signal }) => {
+      // Check preconditions
+      const hasContent = playbacks.some(playback => playback !== null)
+      if (!hasContent) {
+        log('render: no content')
+        return null
+      }
 
-  // The render resource with automatic abort management
-  const [result, { mutate, cancel }] = createCancellableResource(
-    every(
-      renderParams,
-      () => renderParams()?.playbacks.some(playback => playback !== null),
-      () => duration() > 0
-    ),
-    async ([params], { signal }): Promise<RenderResult | null> => {
-      const { playbacks, compositor } = params
+      const currentDuration = duration()
+      if (currentDuration <= 0) {
+        log('render: no duration')
+        return null
+      }
 
       setProgress(0)
 
-      const currentDuration = duration()
       const totalFrames = Math.ceil(currentDuration * fps)
       log('starting', { duration: currentDuration, fps, totalFrames, bitrate })
 
@@ -203,22 +203,22 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
         log('error', { error: err })
         throw err
       }
-    },
+    }
   )
 
-  // Derived state from resource
-  const isRendering = () => result.loading
-  const hasPreRender = () => result() !== null && result() !== undefined
-  const playback = () => result()?.playback ?? null
-  const blob = () => result()?.blob ?? null
+  // Derived state from action
+  const isRendering = renderAction.pending
+  const hasPreRender = () => renderAction.result() !== null
+  const playback = () => renderAction.result()?.playback ?? null
+  const blob = () => renderAction.result()?.blob ?? null
 
   function invalidate() {
-    const _result = result()
-    if (_result) {
-      _result.playback.destroy()
-      _result.demuxer.destroy()
+    const result = renderAction.result()
+    if (result) {
+      result.playback.destroy()
+      result.demuxer.destroy()
     }
-    mutate(null)
+    renderAction.clear()
     setProgress(0)
     lastSentTimestamp = null
     log('invalidated')
@@ -227,8 +227,8 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   function render(playbacks: (Playback | null)[], compositor: WorkerCompositor) {
     // Clear any existing pre-render first
     invalidate()
-    // Trigger the resource by setting new params
-    setRenderParams({ playbacks, compositor })
+    // Submit the action
+    renderAction.submit({ playbacks, compositor })
   }
 
   function tick(time: number, playing: boolean): VideoFrame | null {
@@ -264,7 +264,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
 
   // Cleanup on disposal
   onCleanup(() => {
-    cancel()
+    renderAction.cancel()
     invalidate()
   })
 
@@ -277,7 +277,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
     blob,
     // Actions
     render,
-    cancel,
+    cancel: renderAction.cancel,
     invalidate,
     tick,
     resetForLoop,
