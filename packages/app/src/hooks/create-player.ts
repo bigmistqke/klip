@@ -1,5 +1,5 @@
 import { debug, getGlobalPerfMonitor } from '@eddy/utils'
-import { createMemo, onCleanup, type Accessor } from 'solid-js'
+import { createMemo, type Accessor } from 'solid-js'
 import { createCompositorWorkerWrapper } from '~/workers'
 import type { WorkerCompositor } from '~/workers/create-compositor-worker'
 import { createClock, type Clock } from './create-clock'
@@ -179,7 +179,7 @@ export async function createPlayer(
 
   function destroy(): void {
     stopRenderLoop()
-    preRenderer.cancel()
+    preRenderer.invalidate()
     for (const slot of slots) {
       slot.destroy()
     }
@@ -188,9 +188,6 @@ export async function createPlayer(
 
   // Start render loop
   startRenderLoop()
-
-  // Cleanup
-  onCleanup(destroy)
 
   return {
     // Canvas

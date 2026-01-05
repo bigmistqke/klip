@@ -29,10 +29,7 @@ export interface ResourceFetcherInfo<S> {
   refetching: S | boolean
 }
 
-export type ResourceFetcher<S, T> = (
-  source: S,
-  info: ResourceFetcherInfo<S>,
-) => T | Promise<T>
+export type ResourceFetcher<S, T> = (source: S, info: ResourceFetcherInfo<S>) => T | Promise<T>
 
 export type ManagedResourceOptions<T, S> = Omit<ResourceOptions<T, S>, 'storage'> & {
   storage?: ResourceOptions<T, S>['storage']
@@ -152,10 +149,7 @@ export function resource<T, S = true>(
     runCleanups()
   })
 
-  const wrappedFetcher = async (
-    sourceValue: S,
-    info: { refetching: S | boolean },
-  ): Promise<T> => {
+  const wrappedFetcher = async (sourceValue: S, info: { refetching: S | boolean }): Promise<T> => {
     // Abort previous fetch and run cleanups on refetch
     if (info.refetching) {
       if (abortController) {
@@ -204,7 +198,5 @@ export function resource<T, S = true>(
     }
   }
 
-  const [res, { mutate, refetch }] = createResource(source, wrappedFetcher, options)
-
-  return [res, { mutate, refetch }]
+  return createResource(source, wrappedFetcher, options)
 }

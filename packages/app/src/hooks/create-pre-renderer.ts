@@ -8,7 +8,7 @@ import type { Playback } from '@eddy/playback'
 import { createPlayback } from '@eddy/playback'
 import { debug } from '@eddy/utils'
 import { BufferTarget, Output, VideoSample, VideoSampleSource, WebMOutputFormat } from 'mediabunny'
-import { createSignal, onCleanup, type Accessor } from 'solid-js'
+import { createSignal, type Accessor } from 'solid-js'
 import { createAction } from '~/lib/create-action'
 import { createDemuxerWorker } from '~/workers'
 import type { WorkerCompositor } from '~/workers/create-compositor-worker'
@@ -263,12 +263,6 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
     playback()?.resetForLoop(time)
     lastSentTimestamp = null
   }
-
-  // Cleanup on disposal
-  onCleanup(() => {
-    renderAction.cancel()
-    invalidate()
-  })
 
   return {
     // State
