@@ -491,7 +491,7 @@ export function createEditor(options: CreateEditorOptions) {
 
       if (_player && !_player.hasClip(trackIndex)) {
         setSelectedTrack(trackIndex)
-        previewAction(trackIndex).catch(() => {})
+        previewAction.try(trackIndex)
       }
     },
 
@@ -501,9 +501,9 @@ export function createEditor(options: CreateEditorOptions) {
       if (startRecordingAction.pending() || stopRecordingAction.pending()) return
 
       if (isRecording()) {
-        stopRecordingAction().catch(() => {})
+        stopRecordingAction.try()
       } else {
-        startRecordingAction(trackIndex).catch(() => {})
+        startRecordingAction.try(trackIndex)
       }
     },
 

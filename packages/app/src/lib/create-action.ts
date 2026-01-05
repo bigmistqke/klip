@@ -17,6 +17,10 @@ export type ActionFn<T, R> = [T] extends [undefined]
   ? () => Promise<R>
   : (args: T) => Promise<R>
 
+export type TryFn<T, R> = [T] extends [undefined]
+  ? () => Promise<R | undefined>
+  : (args: T) => Promise<R | undefined>
+
 export type Action<T, R> = ActionFn<T, R> & {
   /** Whether the action is currently running */
   pending: Accessor<boolean>
@@ -28,6 +32,8 @@ export type Action<T, R> = ActionFn<T, R> & {
   cancel: () => void
   /** Clear the result and error */
   clear: () => void
+  /** Call the action without throwing - returns undefined on error */
+  try: TryFn<T, R>
 }
 
 /**
@@ -115,11 +121,20 @@ export function createAction<T = undefined, R = void>(
     return promise
   }
 
+  async function tryAction(args?: T): Promise<R | undefined> {
+    try {
+      return await action(args)
+    } catch {
+      return undefined
+    }
+  }
+
   return Object.assign(action, {
     pending,
     result,
     error,
     cancel,
     clear,
+    try: tryAction,
   }) as Action<T, R>
 }
