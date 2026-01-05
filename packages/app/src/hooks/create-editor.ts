@@ -134,6 +134,11 @@ export function createEditor(options: CreateEditorOptions) {
     const capture = rpc<CaptureWorkerMethods>(new CaptureWorker())
     const muxer = rpc<MuxerWorkerMethods>(new MuxerWorker())
 
+    onCleanup(() => {
+      capture[$MESSENGER].terminate()
+      muxer[$MESSENGER].terminate()
+    })
+
     // Create MessageChannel to connect capture → muxer
     const channel = new MessageChannel()
 
@@ -146,11 +151,6 @@ export function createEditor(options: CreateEditorOptions) {
     // Pre-initialize VP9 encoder (avoids ~2s startup during recording)
     await muxer.preInit()
     log('workers ready')
-
-    onCleanup(() => {
-      capture[$MESSENGER].terminate()
-      muxer[$MESSENGER].terminate()
-    })
 
     return { capture, muxer }
   })
@@ -518,7 +518,7 @@ export function createEditor(options: CreateEditorOptions) {
         recordAction.cancel()
 
         // Await the result
-        const result = await recordAction.resolve()
+        const result = await recordAction.promise()
 
         previewAction.clear()
         setSelectedTrack(null)

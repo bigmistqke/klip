@@ -82,7 +82,7 @@ export type Action<T, R> = ActionFn<T, R> & {
   /** Call the action without throwing - returns undefined on error */
   try: TryFn<T, R>
   /** Await the result - waits for completion if pending, returns current result otherwise */
-  resolve: () => Promise<R | undefined>
+  promise: () => Promise<R | undefined>
 }
 
 /** Check if a function is a generator function */
@@ -250,7 +250,7 @@ export function action<T = undefined, R = void>(fetcher: ActionFetcher<T, R>): A
     }
   }
 
-  async function resolve(): Promise<R | undefined> {
+  async function promise(): Promise<R | undefined> {
     if (currentPromise) {
       try {
         return await currentPromise
@@ -268,6 +268,6 @@ export function action<T = undefined, R = void>(fetcher: ActionFetcher<T, R>): A
     cancel,
     clear,
     try: tryAction,
-    resolve,
+    promise,
   }) as Action<T, R>
 }
