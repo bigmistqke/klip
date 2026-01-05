@@ -11,6 +11,9 @@
 
 import { expose, rpc } from '@bigmistqke/rpc/messenger'
 import type { VideoFrameData } from '@eddy/codecs'
+import { debug } from '@eddy/utils'
+
+const log = debug('capture-worker', false)
 
 export interface CaptureWorkerMethods {
   /** Set the muxer port for forwarding frames (called before start) */
@@ -55,7 +58,7 @@ const methods: CaptureWorkerMethods = {
   setMuxerPort(port: MessagePort) {
     port.start()
     muxer = rpc<MuxerPortMethods>(port)
-    console.log('[capture] received muxer port')
+    log('received muxer port')
   },
 
   async start(readable: ReadableStream<VideoFrame>) {
@@ -63,7 +66,7 @@ const methods: CaptureWorkerMethods = {
       throw new Error('No muxer - call setMuxerPort first')
     }
 
-    console.log('[capture] starting')
+    log('starting')
     capturing = true
     reader = readable.getReader()
 
@@ -91,7 +94,7 @@ const methods: CaptureWorkerMethods = {
 
         if (gap > 0.5) {
           // Frame1 is stale - discard it, use frame2 as first
-          console.log(`[capture] discarding stale frame, gap=${gap.toFixed(3)}s`)
+          log('discarding stale frame', { gap: gap.toFixed(3) })
           frame1.close()
           firstTimestamp = frame2.timestamp
           const data = await copyFrameToBuffer(frame2)
@@ -122,19 +125,19 @@ const methods: CaptureWorkerMethods = {
         frameCount++
       }
     } catch (err) {
-      console.error('[capture] error:', err)
+      log('error', err)
       throw err
     }
 
     // Signal end of stream
     muxer.captureEnded(frameCount)
-    console.log(`[capture] done, ${frameCount} frames`)
+    log('done', { frameCount })
   },
 
   stop() {
     capturing = false
     reader?.cancel().catch(() => {})
-    console.log('[capture] stop')
+    log('stop')
   },
 }
 

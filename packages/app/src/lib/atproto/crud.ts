@@ -8,7 +8,10 @@ import {
   stemValidators,
   stemWireValidators,
 } from '@eddy/lexicons'
+import { debug } from '@eddy/utils'
 import * as v from 'valibot'
+
+const log = debug('crud', false)
 
 export interface RecordRef {
   uri: string
@@ -103,7 +106,7 @@ export async function getStemBlob(agent: Agent, stemUri: string): Promise<Blob> 
   // Handle both BlobRef (ref is CID) and untyped (cid is string) formats
   const blobCid = 'ref' in blob ? blob.ref.toString() : blob.cid
 
-  console.log('Fetching blob:', { did: repo, cid: blobCid })
+  log('fetching blob', { did: repo, cid: blobCid })
 
   // Fetch the actual blob
   const blobResponse = await agent.com.atproto.sync.getBlob({
@@ -263,7 +266,7 @@ export async function publishProject(
     createdAt: project.createdAt,
   })
 
-  console.log('Creating project record:', JSON.stringify(record, null, 2))
+  log('creating project record', record)
 
   const response = await agent.com.atproto.repo.createRecord({
     repo: agent.assertDid,
