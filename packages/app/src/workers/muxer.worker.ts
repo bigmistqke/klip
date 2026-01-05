@@ -13,6 +13,9 @@
 
 import { expose } from '@bigmistqke/rpc/messenger'
 import { createMuxer, type Muxer, type VideoFrameData } from '@eddy/codecs'
+import { debug } from '@eddy/utils'
+
+const log = debug('muxer-worker', false)
 
 export interface MuxerWorkerMethods {
   /**
@@ -49,14 +52,14 @@ let capturedFrameCount = 0
 
 const methods: MuxerWorkerMethods = {
   setCapturePort(port: MessagePort) {
-    console.log('[muxer] received capture port')
+    log('received capture port')
     // Expose methods on this port for capture worker to call
     expose(
       {
         addVideoFrame: methods.addVideoFrame,
         captureEnded: (frameCount: number) => {
           capturedFrameCount = frameCount
-          console.log('[muxer] capture ended, frameCount:', capturedFrameCount)
+          log('capture ended', { frameCount: capturedFrameCount })
         },
       },
       { to: port },
@@ -66,29 +69,29 @@ const methods: MuxerWorkerMethods = {
   async preInit() {
     if (muxer?.isReady) return
 
-    console.log('[muxer] pre-initializing VP9 encoder...')
+    log('pre-initializing VP9 encoder...')
     muxer = createMuxer({ videoCodec: 'vp9', videoBitrate: 2_000_000 })
     await muxer.init()
-    console.log('[muxer] pre-initialization complete')
+    log('pre-initialization complete')
   },
 
   addVideoFrame(data: VideoFrameData) {
     if (!muxer) {
-      console.warn('[muxer] not initialized, dropping frame')
+      log('not initialized, dropping frame')
       return
     }
     muxer.addVideoFrame(data)
   },
 
   async finalize() {
-    console.log('[muxer] finalizing, captured:', capturedFrameCount)
+    log('finalizing', { captured: capturedFrameCount })
 
     if (!muxer) {
       return { blob: new Blob(), frameCount: 0 }
     }
 
     const result = await muxer.finalize()
-    console.log('[muxer] finalized:', result.videoFrameCount, 'frames,', result.blob.size, 'bytes')
+    log('finalized', { frames: result.videoFrameCount, bytes: result.blob.size })
 
     return { blob: result.blob, frameCount: result.videoFrameCount }
   },
