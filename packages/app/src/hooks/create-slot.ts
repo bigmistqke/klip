@@ -1,9 +1,12 @@
+import { $MESSENGER, rpc, transfer } from '@bigmistqke/rpc/messenger'
+import type { Demuxer } from '@eddy/codecs'
 import { createAudioPipeline, type AudioPipeline } from '@eddy/mixer'
 import { createPlayback, type Playback } from '@eddy/playback'
 import type { Accessor } from 'solid-js'
 import { action } from '~/hooks/action'
-import { createDemuxerWorker } from '~/workers'
-import type { WorkerCompositor } from '~/workers/create-compositor-worker'
+import type { Compositor } from '~/hooks/create-player'
+import type { DemuxWorkerMethods } from '~/workers/demux.worker'
+import DemuxWorker from '~/workers/demux.worker?worker'
 
 export interface Slot {
   // State (reactive)
@@ -41,7 +44,7 @@ export interface Slot {
 
 export interface CreateSlotOptions {
   index: number
-  compositor: WorkerCompositor
+  compositor: Compositor
 }
 
 export function createSlot(options: CreateSlotOptions): Slot {
@@ -52,7 +55,19 @@ export function createSlot(options: CreateSlotOptions): Slot {
 
   // Load action - manages demuxer and playback lifecycle
   const loadAction = action(async (blob: Blob, { onCleanup }) => {
-    const demuxer = await createDemuxerWorker(blob)
+    // Create demuxer worker
+    const worker = rpc<DemuxWorkerMethods>(new DemuxWorker())
+    const buffer = await blob.arrayBuffer()
+    const info = await worker.init(buffer)
+
+    const demuxer: Demuxer = Object.assign(worker, {
+      info,
+      destroy() {
+        worker.destroy()
+        worker[$MESSENGER].terminate()
+      },
+    })
+
     const newPlayback = await createPlayback(demuxer, {
       audioDestination: audioPipeline.gain,
     })
@@ -156,7 +171,7 @@ export function createSlot(options: CreateSlotOptions): Slot {
     const frame = currentPlayback.getFrameAt(time)
     if (frame) {
       lastSentTimestamp = frameTimestamp
-      compositor.setFrame(index, frame)
+      compositor.setFrame(index, transfer(frame))
     }
   }
 

@@ -4,14 +4,17 @@
  * Manages all pre-render state with signals and handles the pre-rendered playback lifecycle.
  */
 
+import { $MESSENGER, rpc, transfer } from '@bigmistqke/rpc/messenger'
+import type { Demuxer } from '@eddy/codecs'
 import type { Playback } from '@eddy/playback'
 import { createPlayback } from '@eddy/playback'
 import { debug } from '@eddy/utils'
 import { BufferTarget, Output, VideoSample, VideoSampleSource, WebMOutputFormat } from 'mediabunny'
 import { createSignal, type Accessor } from 'solid-js'
 import { action } from '~/hooks/action'
-import { createDemuxerWorker } from '~/workers'
-import type { WorkerCompositor } from '~/workers/create-compositor-worker'
+import type { Compositor } from '~/hooks/create-player'
+import type { DemuxWorkerMethods } from '~/workers/demux.worker'
+import DemuxWorker from '~/workers/demux.worker?worker'
 
 const log = debug('pre-renderer', true)
 
@@ -26,7 +29,7 @@ export interface PreRenderOptions {
 
 interface RenderParams {
   playbacks: (Playback | null)[]
-  compositor: WorkerCompositor
+  compositor: Compositor
 }
 
 interface RenderResult {
@@ -49,7 +52,7 @@ export interface PreRendererState {
 
 export interface PreRendererActions {
   /** Start pre-rendering from the given playbacks */
-  render: (playbacks: (Playback | null)[], compositor: WorkerCompositor) => void
+  render: (playbacks: (Playback | null)[], compositor: Compositor) => void
   /** Cancel in-progress pre-render */
   cancel: () => void
   /** Invalidate and clear pre-rendered content */
@@ -159,7 +162,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
 
               const frame = playback.getFrameAt(time)
               if (frame) {
-                await compositor.setCaptureFrame(i, frame)
+                await compositor.setCaptureFrame(i, transfer(frame))
                 activeSlots[i] = 1
               }
             }),
@@ -196,8 +199,19 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
 
         log('complete', { frameCount, blobSize: renderedBlob.size })
 
-        // Create playback for the pre-rendered video
-        const demuxer = await createDemuxerWorker(renderedBlob)
+        // Create demuxer worker for pre-rendered video
+        const worker = rpc<DemuxWorkerMethods>(new DemuxWorker())
+        const demuxBuffer = await renderedBlob.arrayBuffer()
+        const info = await worker.init(demuxBuffer)
+
+        const demuxer: Demuxer = Object.assign(worker, {
+          info,
+          destroy() {
+            worker.destroy()
+            worker[$MESSENGER].terminate()
+          },
+        })
+
         const renderedPlayback = await createPlayback(demuxer)
         await renderedPlayback.seek(0)
 
@@ -229,7 +243,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
     log('invalidated')
   }
 
-  function render(playbacks: (Playback | null)[], compositor: WorkerCompositor) {
+  function render(playbacks: (Playback | null)[], compositor: Compositor) {
     // Clear any existing pre-render first
     invalidate()
     // Call the action

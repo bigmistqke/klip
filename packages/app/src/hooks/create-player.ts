@@ -1,10 +1,13 @@
+import { $MESSENGER, rpc, transfer, type RPC } from '@bigmistqke/rpc/messenger'
 import { debug, getGlobalPerfMonitor } from '@eddy/utils'
 import { createMemo, type Accessor } from 'solid-js'
-import { createCompositorWorkerWrapper } from '~/workers'
-import type { WorkerCompositor } from '~/workers/create-compositor-worker'
+import type { CompositorWorkerMethods } from '~/workers/compositor.worker'
+import CompositorWorker from '~/workers/compositor.worker?worker'
 import { createClock, type Clock } from './create-clock'
 import { createPreRenderer, type PreRenderer } from './create-pre-renderer'
 import { createSlot, type Slot } from './create-slot'
+
+type CompositorRPC = RPC<CompositorWorkerMethods>
 
 const log = debug('player', false)
 const perf = getGlobalPerfMonitor()
@@ -49,11 +52,17 @@ export interface PlayerActions {
   destroy: () => void
 }
 
+export type Compositor = Omit<CompositorRPC, 'init' | 'setPreviewStream'> & {
+  canvas: HTMLCanvasElement
+  /** Takes MediaStream (converted to ReadableStream internally) */
+  setPreviewStream(index: number, stream: MediaStream | null): void
+}
+
 export interface Player extends PlayerState, PlayerActions {
   /** The canvas element */
   canvas: HTMLCanvasElement
   /** The compositor (for pre-renderer access) */
-  compositor: WorkerCompositor
+  compositor: Compositor
   /** Clock for time management */
   clock: Clock
   /** Pre-renderer state and actions */
@@ -76,14 +85,59 @@ if (typeof window !== 'undefined') {
  * Create a player that manages compositor, playbacks, and audio pipelines
  */
 export async function createPlayer(
-  canvas: HTMLCanvasElement,
+  canvasElement: HTMLCanvasElement,
   width: number,
   height: number,
 ): Promise<Player> {
   log('createPlayer', { width, height })
 
-  // Create compositor in worker
-  const compositor = await createCompositorWorkerWrapper(canvas, width, height)
+  // Set canvas size and transfer to worker
+  canvasElement.width = width
+  canvasElement.height = height
+  const offscreen = canvasElement.transferControlToOffscreen()
+
+  // Create compositor worker
+  const worker = rpc<CompositorWorkerMethods>(new CompositorWorker())
+  await worker.init(transfer(offscreen) as unknown as OffscreenCanvas, width, height)
+
+  // Track preview processors for cleanup
+  const previewProcessors: (MediaStreamTrackProcessor<VideoFrame> | null)[] = [
+    null,
+    null,
+    null,
+    null,
+  ]
+
+  const compositor: Compositor = Object.assign(worker, {
+    canvas: canvasElement,
+
+    setPreviewStream(index: number, stream: MediaStream | null) {
+      // Clean up existing processor
+      previewProcessors[index] = null
+
+      if (stream) {
+        const videoTrack = stream.getVideoTracks()[0]
+        if (videoTrack) {
+          const processor = new MediaStreamTrackProcessor({ track: videoTrack })
+          previewProcessors[index] = processor
+          worker.setPreviewStream(
+            index,
+            transfer(processor.readable) as unknown as ReadableStream<VideoFrame>,
+          )
+        }
+      } else {
+        worker.setPreviewStream(index, null)
+      }
+    },
+
+    destroy() {
+      for (let i = 0; i < 4; i++) {
+        previewProcessors[i] = null
+      }
+      worker.destroy()
+      worker[$MESSENGER].terminate()
+    },
+  })
 
   // Create slots
   const slots = Array.from({ length: NUM_TRACKS }, (_, index) => createSlot({ index, compositor }))
@@ -141,7 +195,7 @@ export async function createPlayer(
       const frame = preRenderer.tick(time, playing)
       if (frame) {
         compositor.setGrid(1, 1)
-        compositor.setFrame(0, frame)
+        compositor.setFrame(0, transfer(frame))
         perf.increment('prerender-frame-sent')
       }
 

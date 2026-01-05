@@ -17,7 +17,7 @@ export interface CompositorWorkerMethods {
   setPreviewStream(index: number, stream: ReadableStream<VideoFrame> | null): void
 
   /** Set a playback frame for a track slot (for time-synced playback) */
-  setFrame(index: number, frame: VideoFrame | null): void
+  setFrame(index: number, frame: Transferred<VideoFrame> | null): void
 
   /** Set grid layout (1x1 = full-screen single video, 2x2 = quad view) */
   setGrid(cols: number, rows: number): void

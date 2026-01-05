@@ -14,9 +14,9 @@ import { createSignal, Match, Switch } from 'solid-js'
 import { action } from '~/hooks/action'
 import { resource } from '~/hooks/resource'
 import type { CaptureWorkerMethods } from '~/workers/debug-capture.worker'
-import DebugCaptureWorkerUrl from '~/workers/debug-capture.worker?worker&url'
+import DebugCaptureWorker from '~/workers/debug-capture.worker?worker'
 import type { MuxerWorkerMethods } from '~/workers/debug-muxer.worker'
-import DebugMuxerWorkerUrl from '~/workers/debug-muxer.worker?worker&url'
+import DebugMuxerWorker from '~/workers/debug-muxer.worker?worker'
 
 export default function Debug() {
   const [log, setLog] = createSignal<string[]>([])
@@ -29,8 +29,8 @@ export default function Debug() {
   // Pre-initialize workers on mount
   const [workers] = resource(async ({ onCleanup }) => {
     addLog('creating workers...')
-    const capture = rpc<CaptureWorkerMethods>(new Worker(DebugCaptureWorkerUrl, { type: 'module' }))
-    const muxer = rpc<MuxerWorkerMethods>(new Worker(DebugMuxerWorkerUrl, { type: 'module' }))
+    const capture = rpc<CaptureWorkerMethods>(new DebugCaptureWorker())
+    const muxer = rpc<MuxerWorkerMethods>(new DebugMuxerWorker())
 
     // Create MessageChannel to connect capture → muxer
     const channel = new MessageChannel()
