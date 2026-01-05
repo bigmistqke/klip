@@ -8,13 +8,7 @@ import type { Demuxer } from '@eddy/codecs'
 import type { Playback } from '@eddy/playback'
 import { createPlayback } from '@eddy/playback'
 import { debug } from '@eddy/utils'
-import {
-  BufferTarget,
-  Output,
-  VideoSample,
-  VideoSampleSource,
-  WebMOutputFormat,
-} from 'mediabunny'
+import { BufferTarget, Output, VideoSample, VideoSampleSource, WebMOutputFormat } from 'mediabunny'
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
 import { createCancellableResource } from '~/lib/create-cancellable-resource'
 import { createDemuxerWorker } from '~/workers'
@@ -135,10 +129,11 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
         log('encoder started')
 
         // Seek all playbacks to start
-        const seekPromises = playbacks
-          .filter((playback): playback is Playback => playback !== null)
-          .map(playback => playback.seek(0))
-        await Promise.all(seekPromises)
+        await Promise.all(
+          playbacks
+            .filter((playback): playback is Playback => playback !== null)
+            .map(playback => playback.seek(0)),
+        )
 
         let frameCount = 0
 
@@ -155,10 +150,11 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
           // Track which slots are active
           const activeSlots: [number, number, number, number] = [0, 0, 0, 0]
 
-          // Get frames from all playbacks
-          for (let i = 0; i < playbacks.length; i++) {
-            const playback = playbacks[i]
-            if (playback) {
+          // Get frames from all playbacks in parallel
+          await Promise.all(
+            playbacks.map(async (playback, i) => {
+              if (!playback) return
+
               // Ensure frames are buffered
               const frameTimestamp = playback.getFrameTimestamp(time)
               if (frameTimestamp === null) {
@@ -170,8 +166,8 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
                 await compositor.setCaptureFrame(i, frame)
                 activeSlots[i] = 1
               }
-            }
-          }
+            })
+          )
 
           // Render to capture canvas
           await compositor.renderCapture(activeSlots)
@@ -217,7 +213,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
         log('error', { error: err })
         throw err
       }
-    }
+    },
   )
 
   // Derived state from resource
