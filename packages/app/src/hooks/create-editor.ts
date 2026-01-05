@@ -28,14 +28,6 @@ interface LocalClipState {
   duration?: number
 }
 
-interface EditorStore {
-  project: Project
-  local: {
-    clips: Record<string, LocalClipState>
-  }
-  remoteUri: string | null
-}
-
 function createDefaultProject(): Project {
   return {
     schemaVersion: 1,
@@ -105,12 +97,12 @@ export interface CreateEditorOptions {
 }
 
 export function createEditor(options: CreateEditorOptions) {
-  // Project store (inlined)
-  const [store, setStore] = createStore<EditorStore>({
-    project: createDefaultProject(),
-    local: { clips: {} },
-    remoteUri: null,
-  })
+  // Project store
+  const [project, setProject] = createStore<Project>(createDefaultProject())
+
+  // Local state (not persisted)
+  const [localClips, setLocalClips] = createStore<Record<string, LocalClipState>>({})
+  const [remoteUri, setRemoteUri] = createSignal<string | null>(null)
 
   // Core UI state
   const [selectedTrackIndex, setSelectedTrack] = createSignal<number | null>(null)
@@ -122,8 +114,8 @@ export function createEditor(options: CreateEditorOptions) {
   // Create player as a resource
   const [player] = createResource(
     () => ({
-      width: store.project.canvas.width,
-      height: store.project.canvas.height,
+      width: project.canvas.width,
+      height: project.canvas.height,
     }),
     async ({ width, height }) => {
       const _player = await createPlayer(width, height)
@@ -145,8 +137,8 @@ export function createEditor(options: CreateEditorOptions) {
     every(options.agent, () => options.rkey),
     async ([agent, rkey]) => {
       const record = await getProjectByRkey(agent, rkey, options.handle)
-      setStore('project', record.value)
-      setStore('remoteUri', record.uri)
+      setProject(record.value)
+      setRemoteUri(record.uri)
       return record
     },
   )
@@ -195,13 +187,12 @@ export function createEditor(options: CreateEditorOptions) {
 
   // Project store actions
   function setTitle(title: string) {
-    setStore('project', 'title', title)
-    setStore('project', 'updatedAt', new Date().toISOString())
+    setProject('title', title)
+    setProject('updatedAt', new Date().toISOString())
   }
 
   function setEffectValue(trackId: string, effectIndex: number, value: number) {
-    setStore(
-      'project',
+    setProject(
       'tracks',
       t => t.id === trackId,
       'audioPipeline',
@@ -216,7 +207,7 @@ export function createEditor(options: CreateEditorOptions) {
   }
 
   function getEffectValue(trackId: string, effectIndex: number): number {
-    const track = store.project.tracks.find(t => t.id === trackId)
+    const track = project.tracks.find(t => t.id === trackId)
     const effect = track?.audioPipeline?.[effectIndex]
     if (effect && 'value' in effect && effect.value && 'value' in effect.value) {
       return effect.value.value / 100
@@ -225,7 +216,7 @@ export function createEditor(options: CreateEditorOptions) {
   }
 
   function getTrackPipeline(trackId: string): AudioEffect[] {
-    const track = store.project.tracks.find(t => t.id === trackId)
+    const track = project.tracks.find(t => t.id === trackId)
     return track?.audioPipeline ?? []
   }
 
@@ -233,8 +224,7 @@ export function createEditor(options: CreateEditorOptions) {
     const trackId = `track-${trackIndex}`
     const clipId = `clip-${trackIndex}-${Date.now()}`
 
-    setStore(
-      'project',
+    setProject(
       'tracks',
       t => t.id === trackId,
       produce((track: Track) => {
@@ -248,22 +238,21 @@ export function createEditor(options: CreateEditorOptions) {
       }),
     )
 
-    setStore('local', 'clips', clipId, { blob, duration })
-    setStore('project', 'updatedAt', new Date().toISOString())
+    setLocalClips(clipId, { blob, duration })
+    setProject('updatedAt', new Date().toISOString())
   }
 
   function clearTrack(trackIndex: number) {
     const trackId = `track-${trackIndex}`
-    const track = store.project.tracks.find(t => t.id === trackId)
+    const track = project.tracks.find(t => t.id === trackId)
 
     if (track) {
       for (const clip of track.clips) {
-        setStore('local', 'clips', clip.id, undefined!)
+        setLocalClips(clip.id, undefined!)
       }
     }
 
-    setStore(
-      'project',
+    setProject(
       'tracks',
       t => t.id === trackId,
       produce((track: Track) => {
@@ -271,11 +260,11 @@ export function createEditor(options: CreateEditorOptions) {
       }),
     )
 
-    setStore('project', 'updatedAt', new Date().toISOString())
+    setProject('updatedAt', new Date().toISOString())
   }
 
   function getLocalClipBlob(clipId: string): Blob | undefined {
-    return store.local.clips[clipId]?.blob
+    return localClips[clipId]?.blob
   }
 
   // Helper to get blob by clipId (from remote stems or local recordings)
@@ -370,7 +359,7 @@ export function createEditor(options: CreateEditorOptions) {
     }
 
     const clipBlobs = new Map<string, { blob: Blob; duration: number }>()
-    for (const track of store.project.tracks) {
+    for (const track of project.tracks) {
       for (const clip of track.clips) {
         const blob = getClipBlob(clip.id)
         const duration = clip.duration
@@ -384,14 +373,14 @@ export function createEditor(options: CreateEditorOptions) {
       throw new Error('No recordings to publish')
     }
 
-    const result = await publishProject(currentAgent, store.project, clipBlobs)
+    const result = await publishProject(currentAgent, project, clipBlobs)
     return result.uri.split('/').pop()
   })
 
   whenEffect(player, player => {
     createEffect(() => {
       // Load clips into player when project store changes
-      const tracks = store.project.tracks
+      const tracks = project.tracks
       log('effect: checking clips to load', { numTracks: tracks.length })
 
       for (let i = 0; i < 4; i++) {
@@ -465,7 +454,7 @@ export function createEditor(options: CreateEditorOptions) {
     setMasterVolume,
     setTitle,
     stopRecordingPending: stopRecordingAction.pending,
-    store,
+    project,
 
     publish() {
       return publishAction()
