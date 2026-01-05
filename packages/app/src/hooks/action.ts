@@ -141,10 +141,12 @@ export function action<T = undefined, R = void>(fetcher: ActionFetcher<T, R>): A
 
   function cancel() {
     cleanup()
+    setPending(false)
   }
 
   function clear() {
     cleanup()
+    setPending(false)
     setResult(undefined)
     setError(undefined)
   }

@@ -4,7 +4,6 @@ import { createMemo, type Accessor } from 'solid-js'
 import type { CompositorWorkerMethods } from '~/workers/compositor.worker'
 import CompositorWorker from '~/workers/compositor.worker?worker'
 import { createClock, type Clock } from './create-clock'
-import { createPreRenderer, type PreRenderer } from './create-pre-renderer'
 import { createSlot, type Slot } from './create-slot'
 
 type CompositorRPC = RPC<CompositorWorkerMethods>
@@ -61,12 +60,10 @@ export type Compositor = Omit<CompositorRPC, 'init' | 'setPreviewStream'> & {
 export interface Player extends PlayerState, PlayerActions {
   /** The canvas element */
   canvas: HTMLCanvasElement
-  /** The compositor (for pre-renderer access) */
+  /** The compositor */
   compositor: Compositor
   /** Clock for time management */
   clock: Clock
-  /** Pre-renderer state and actions */
-  preRenderer: PreRenderer
   /** Get track slot */
   getSlot: (trackIndex: number) => Slot
   /** Performance logging */
@@ -108,8 +105,17 @@ export async function createPlayer(
     null,
   ]
 
-  const compositor: Compositor = Object.assign(worker, {
+  // Create compositor wrapper without mutating the RPC proxy
+  const compositor: Compositor = {
     canvas: canvasElement,
+
+    // Delegate to worker methods
+    setFrame: worker.setFrame,
+    setGrid: worker.setGrid,
+    render: worker.render,
+    setCaptureFrame: worker.setCaptureFrame,
+    renderCapture: worker.renderCapture,
+    captureFrame: worker.captureFrame,
 
     setPreviewStream(index: number, stream: MediaStream | null) {
       // Clean up existing processor
@@ -130,14 +136,14 @@ export async function createPlayer(
       }
     },
 
-    destroy() {
+    async destroy() {
       for (let i = 0; i < 4; i++) {
         previewProcessors[i] = null
       }
-      worker.destroy()
+      await worker.destroy()
       worker[$MESSENGER].terminate()
     },
-  })
+  }
 
   // Create slots
   const slots = Array.from({ length: NUM_TRACKS }, (_, index) => createSlot({ index, compositor }))
@@ -157,9 +163,6 @@ export async function createPlayer(
   // Create clock for time management (reads maxDuration reactively)
   const clock = createClock({ duration: maxDuration })
 
-  // Create pre-renderer hook (reads maxDuration reactively)
-  const preRenderer = createPreRenderer({ duration: maxDuration })
-
   // Render loop state
   let animationFrameId: number | null = null
 
@@ -171,45 +174,22 @@ export async function createPlayer(
 
     const time = clock.tick()
     const playing = clock.isPlaying()
-    const hasPreRender = preRenderer.hasPreRender()
 
     // Handle loop reset
     if (playing && clock.loop() && maxDuration() > 0 && time >= maxDuration()) {
       for (const slot of slots) {
         slot.resetForLoop(0)
       }
-      preRenderer.resetForLoop(0)
     }
 
-    // Tick individual playbacks for audio when using pre-render for video
-    if (hasPreRender && playing) {
-      for (const slot of slots) {
-        slot.tick(time, false) // audio only
-      }
+    // Always use 2x2 grid mode
+    compositor.setGrid(2, 2)
+
+    perf.start('getFrames')
+    for (const slot of slots) {
+      slot.renderFrame(time, playing)
     }
-
-    // Use pre-rendered video if available
-    if (hasPreRender) {
-      perf.start('getPreRenderFrame')
-
-      const frame = preRenderer.tick(time, playing)
-      if (frame) {
-        compositor.setGrid(1, 1)
-        compositor.setFrame(0, transfer(frame))
-        perf.increment('prerender-frame-sent')
-      }
-
-      perf.end('getPreRenderFrame')
-    } else {
-      // No pre-render: use 2x2 grid mode
-      compositor.setGrid(2, 2)
-
-      perf.start('getFrames')
-      for (const slot of slots) {
-        slot.renderFrame(time, playing)
-      }
-      perf.end('getFrames')
-    }
+    perf.end('getFrames')
 
     // Render
     compositor.render()
@@ -233,7 +213,6 @@ export async function createPlayer(
 
   function destroy(): void {
     stopRenderLoop()
-    preRenderer.invalidate()
     for (const slot of slots) {
       slot.destroy()
     }
@@ -248,7 +227,6 @@ export async function createPlayer(
     canvas: compositor.canvas,
     compositor,
     clock,
-    preRenderer,
 
     // State (reactive)
     isPlaying: clock.isPlaying,
@@ -262,10 +240,7 @@ export async function createPlayer(
       log('play', { startTime })
 
       // Prepare all playbacks
-      await Promise.all([
-        ...slots.map(slot => slot.prepareToPlay(startTime)),
-        preRenderer.playback()?.prepareToPlay(startTime),
-      ])
+      await Promise.all(slots.map(slot => slot.prepareToPlay(startTime)))
 
       // Start audio
       for (const slot of slots) {

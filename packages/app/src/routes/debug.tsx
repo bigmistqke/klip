@@ -56,20 +56,14 @@ export default function Debug() {
     return { capture, muxer }
   })
 
-  const getUserMedia = action(function* (_: undefined, { onCleanup }) {
+  const getUserMedia = action(async function (_: undefined, { onCleanup }) {
     addLog('requesting camera')
-    const media = yield* defer(
-      navigator.mediaDevices
-        .getUserMedia({
-          video: { facingMode: 'user', width: 640, height: 480 },
-          audio: false,
-        })
-        .then(stream => {
-          onCleanup(() => stream.getTracks().forEach(track => track.stop()))
-          return stream
-        }),
-    )
-    return media
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: 640, height: 480 },
+      audio: false,
+    })
+    onCleanup(() => stream.getTracks().forEach(track => track.stop()))
+    return stream
   })
 
   // Recording action - uses yield* to compose with getUserMedia
@@ -98,6 +92,7 @@ export default function Debug() {
       addLog('stopping capture...')
       await _workers.capture.stop()
       await capturePromise
+      addLog('stopping capture completed')
     })
 
     addLog('recording...')

@@ -9,7 +9,8 @@
   },
   "scripts": {
     "test:browser": "vitest --config vitest.browser.config.ts",
-    "test:browser:run": "vitest run --config vitest.browser.config.ts"
+    "test:browser:run": "vitest run --config vitest.browser.config.ts",
+    "types": "tsc --noEmit"
   },
   "dependencies": {
     "@eddy/codecs": "workspace:*",

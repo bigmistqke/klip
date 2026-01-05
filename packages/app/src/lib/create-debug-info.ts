@@ -8,7 +8,6 @@ export interface DebugInfo {
     currentTime: number
     hasFrame: boolean
   }>
-  downloadPreRender: () => void
 }
 
 export function createDebugInfo(player: Player) {
@@ -29,20 +28,6 @@ export function createDebugInfo(player: Player) {
         }
       }
       return states
-    },
-    downloadPreRender: () => {
-      const blob = player.preRenderer.blob()
-      if (!blob) {
-        console.log('No pre-rendered video available')
-        return
-      }
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = 'prerender.webm'
-      link.click()
-      URL.revokeObjectURL(url)
-      console.log('Downloaded prerender.webm', { size: blob.size })
     },
   }
 }

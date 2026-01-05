@@ -7,6 +7,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "types": "tsc --noEmit"
+  },
   "dependencies": {
     "@atproto/lexicon": "^0.6.0",
     "@bigmistqke/lexicon-to-valibot": "^0.1.7",

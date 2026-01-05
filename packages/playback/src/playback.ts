@@ -91,7 +91,8 @@ export interface Playback {
   tick(clockTime: number, bufferVideo?: boolean): void
 
   /**
-   * Get frame at specific time (for static display, clones from cache)
+   * Get frame at specific time.
+   * Caller takes ownership and must close the frame when done.
    */
   getFrameAt(time: number): VideoFrame | null
 
@@ -202,8 +203,8 @@ export async function createPlayback(
     if (!frameBuffer) return null
     // Return null if past the clip's duration
     if (duration > 0 && time >= duration) return null
-    const bufferedFrame = frameBuffer.getFrame(time)
-    return bufferedFrame?.frame ?? null
+    // Returns VideoFrame created from raw buffer - caller takes ownership
+    return frameBuffer.getFrame(time)
   }
 
   /** Get timestamp of frame at specific time (for checking if new frame needed) */

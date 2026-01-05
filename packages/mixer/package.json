@@ -7,6 +7,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "types": "tsc --noEmit"
+  },
   "dependencies": {
     "@eddy/utils": "workspace:*"
   },

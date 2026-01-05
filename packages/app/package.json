@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "types": "tsc --noEmit"
   },
   "dependencies": {
     "@atproto/api": "^0.13.0",

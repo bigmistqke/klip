@@ -1,18 +1,10 @@
-// Frame cache (LRU cache for decoded frames)
+// Frame buffer (stores raw ArrayBuffer, creates VideoFrame on-demand)
 export {
-  createFrameCache,
-  destroySharedFrameCache,
-  type FrameCache,
-  type FrameKey,
-  getSharedFrameCache,
-} from './frame-cache'
-
-// Frame buffer
-export {
-  type BufferedFrame,
+  createFrameBuffer,
   type FrameBuffer,
   type FrameBufferOptions,
   type FrameBufferState,
+  type FrameData,
 } from './frame-buffer'
 
 // Audio scheduler

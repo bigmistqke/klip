@@ -60,13 +60,20 @@ export function createSlot(options: CreateSlotOptions): Slot {
     const buffer = await blob.arrayBuffer()
     const info = await worker.init(buffer)
 
-    const demuxer: Demuxer = Object.assign(worker, {
+    // Create demuxer wrapper - don't use Object.assign with proxy
+    // as the proxy's get trap intercepts all property access
+    const demuxer: Demuxer = {
       info,
+      getVideoConfig: () => worker.getVideoConfig(),
+      getAudioConfig: () => worker.getAudioConfig(),
+      getSamples: (trackId, startTime, endTime) => worker.getSamples(trackId, startTime, endTime),
+      getAllSamples: trackId => worker.getAllSamples(trackId),
+      getKeyframeBefore: (trackId, time) => worker.getKeyframeBefore(trackId, time),
       destroy() {
         worker.destroy()
         worker[$MESSENGER].terminate()
       },
-    })
+    }
 
     const newPlayback = await createPlayback(demuxer, {
       audioDestination: audioPipeline.gain,

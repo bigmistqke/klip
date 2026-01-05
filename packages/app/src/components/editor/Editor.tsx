@@ -47,15 +47,6 @@ export const Editor: Component<EditorProps> = props => {
 
   return (
     <div class={styles.container}>
-      {/* Pre-render progress bar */}
-      <Show when={editor.isPreRendering()}>
-        <div class={styles.preRenderProgress}>
-          <div
-            class={styles.preRenderProgressBar}
-            style={{ width: `${editor.preRenderProgress() * 100}%` }}
-          />
-        </div>
-      </Show>
       <Show when={editor.isProjectLoading()}>
         <div class={styles.loadingOverlay}>Loading project...</div>
       </Show>

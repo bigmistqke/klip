@@ -202,24 +202,20 @@ export function createEditor(options: CreateEditorOptions) {
   }
 
   function addRecording(trackIndex: number, blob: Blob, duration: number) {
-    const trackId = `track-${trackIndex}`
     const clipId = `clip-${trackIndex}-${Date.now()}`
 
-    setProject(
-      'tracks',
-      t => t.id === trackId,
-      produce((track: Track) => {
-        track.clips = [
-          {
-            id: clipId,
-            offset: 0,
-            duration: Math.round(duration),
-          },
-        ]
-      }),
-    )
-
+    // Set localClips FIRST so the blob is available when the effect runs
+    // (Solid doesn't track store keys that don't exist when first accessed)
     setLocalClips(clipId, { blob, duration })
+
+    setProject('tracks', trackIndex, 'clips', [
+      {
+        id: clipId,
+        offset: 0,
+        duration: Math.round(duration),
+      },
+    ])
+
     setProject('updatedAt', new Date().toISOString())
   }
 
@@ -313,15 +309,6 @@ export function createEditor(options: CreateEditorOptions) {
 
     await _player?.stop()
 
-    if (_player) {
-      _player.preRenderer.invalidate()
-
-      setTimeout(() => {
-        const playbacks = [0, 1, 2, 3].map(i => _player.getSlot(i).playback())
-        _player.preRenderer.render(playbacks, _player.compositor)
-      }, 500)
-    }
-
     return result
   })
 
@@ -361,22 +348,34 @@ export function createEditor(options: CreateEditorOptions) {
         trackIndex => {
           const trackId = `track-${trackIndex}`
 
+          // Track the current clip ID to detect changes
+          let currentClipId: string | null = null
+
           // Effect for loading/clearing clips
           createEffect(() => {
-            const track = project().tracks.find(t => t.id === trackId)
+            // Access tracks array directly by index for proper reactivity
+            const track = project().tracks[trackIndex]
             const clip = track?.clips[0]
+            const newClipId = clip?.id ?? null
 
+            // Clip changed - clear old one first
+            if (newClipId !== currentClipId) {
+              if (player.hasClip(trackIndex)) {
+                log('clearing old clip from player', { trackIndex, oldClipId: currentClipId })
+                player.clearClip(trackIndex)
+              }
+              currentClipId = newClipId
+            }
+
+            // Load new clip if available
             if (clip) {
               const blob = getClipBlob(clip.id)
               if (blob && !player.hasClip(trackIndex) && !player.isLoading(trackIndex)) {
-                log('effect: loading clip into player', { trackIndex, clipId: clip.id })
+                log('loading clip into player', { trackIndex, clipId: clip.id })
                 player.loadClip(trackIndex, blob).catch(err => {
                   console.error(`Failed to load clip for track ${trackIndex}:`, err)
                 })
               }
-            } else if (player.hasClip(trackIndex)) {
-              log('effect: clearing clip from player', { trackIndex })
-              player.clearClip(trackIndex)
             }
           })
 
@@ -416,7 +415,6 @@ export function createEditor(options: CreateEditorOptions) {
     getTrackPipeline,
     hasAnyRecording,
     isPlayerLoading: () => player.loading,
-    isPreRendering: () => player()?.preRenderer.isRendering() ?? false,
     isProjectLoading: () => project.loading || stemBlobs.loading(),
     isPublishing: publishAction.pending,
     isRecording,
@@ -424,7 +422,6 @@ export function createEditor(options: CreateEditorOptions) {
     loopEnabled: () => player()?.loop() ?? false,
     masterVolume,
     player,
-    preRenderProgress: () => player()?.preRenderer.progress() ?? 0,
     previewPending: previewAction.pending,
     publishError: publishAction.error,
     selectedTrack: selectedTrackIndex,
@@ -493,11 +490,7 @@ export function createEditor(options: CreateEditorOptions) {
 
     clearRecording(index: number) {
       clearTrack(index)
-      const _player = player()
-      if (_player) {
-        _player.clearClip(index)
-        _player.preRenderer.invalidate()
-      }
+      player()?.clearClip(index)
     },
 
     setTrackVolume(index: number, value: number) {
