@@ -52,12 +52,24 @@ let isProcessing = false
 let streamEnded = false
 let encodedCount = 0
 
+let lastTimestamp = -1
+
 async function processQueue() {
   if (isProcessing || !videoSource) return
   isProcessing = true
 
   while (frameQueue.length > 0) {
     const { buffer, format, codedWidth, codedHeight, timestampSec } = frameQueue.shift()!
+
+    // Log first few frames and any timestamp gaps
+    const gap = lastTimestamp >= 0 ? timestampSec - lastTimestamp : 0
+    if (encodedCount < 5 || gap > 0.1) {
+      self.postMessage({
+        type: 'debug',
+        message: `frame ${encodedCount}: ts=${timestampSec.toFixed(3)}s, gap=${(gap * 1000).toFixed(0)}ms`
+      })
+    }
+    lastTimestamp = timestampSec
 
     try {
       // Recreate VideoFrame from buffer with original timestamp and format
@@ -128,9 +140,10 @@ async function handleCaptureMessage(msg: MuxerMessage) {
     output.addVideoTrack(videoSource)
     await output.start()
 
-    self.postMessage({ type: 'started' })
-    // Signal capture worker that we're ready
-    capturePort?.postMessage({ type: 'ready' })
+    self.postMessage({ type: 'started', queued: frameQueue.length })
+
+    // Process any frames that queued during initialization
+    processQueue()
   }
 
   if (msg.type === 'frame') {
@@ -166,5 +179,6 @@ self.onmessage = (e: MessageEvent) => {
     streamEnded = false
     encodedCount = 0
     isProcessing = false
+    lastTimestamp = -1
   }
 }

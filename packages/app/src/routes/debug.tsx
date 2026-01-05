@@ -41,8 +41,13 @@ export default function Debug() {
       addLog(`camera: ${settings?.width}x${settings?.height} @ ${settings?.frameRate}fps`)
 
       // Create workers
+      addLog('creating capture worker...')
       captureWorker = new CaptureWorker()
+      addLog('capture worker created')
+
+      addLog('creating muxer worker...')
       muxerWorker = new MuxerWorker()
+      addLog('muxer worker created')
 
       // Create MessageChannel to connect capture → muxer
       const channel = new MessageChannel()
@@ -51,7 +56,7 @@ export default function Debug() {
       muxerWorker.onmessage = (e) => {
         const msg = e.data
         if (msg.type === 'started') {
-          addLog('muxer started')
+          addLog(`muxer started (${msg.queued} frames queued during init)`)
         }
         if (msg.type === 'progress') {
           addLog(`muxer progress: encoded=${msg.encoded}, queued=${msg.queued}`)
@@ -78,18 +83,26 @@ export default function Debug() {
           setStatus(`error: ${msg.error}`)
           cleanup()
         }
+        if (msg.type === 'debug') {
+          addLog(`muxer: ${msg.message}`)
+        }
       }
 
       // Set up capture worker message handling
       captureWorker.onmessage = (e) => {
         const msg = e.data
-        if (msg.type === 'waiting') {
-          addLog(msg.message)
-          setStatus('initializing encoder...')
+        if (msg.type === 'ready') {
+          // Worker is loaded and ready - NOW create the processor
+          addLog('capture worker ready, creating processor...')
+          const processor = new MediaStreamTrackProcessor({ track: videoTrack })
+          addLog('processor created, starting capture')
+          captureWorker.postMessage(
+            { type: 'start', readable: processor.readable },
+            [processor.readable]
+          )
         }
         if (msg.type === 'capturing') {
           addLog(msg.message)
-          setStatus('recording...')
         }
         if (msg.type === 'done') {
           addLog(`capture done: ${msg.frameCount} frames`)
@@ -97,24 +110,22 @@ export default function Debug() {
         if (msg.type === 'error') {
           addLog(`capture error: ${msg.error}`)
         }
+        if (msg.type === 'debug') {
+          addLog(`capture: ${msg.message}`)
+        }
       }
 
       // Give muxer worker its port
+      addLog('sending port to muxer worker...')
       muxerWorker.postMessage({ type: 'port', port: channel.port2 }, [channel.port2])
+      addLog('port sent')
 
-      // Get readable stream from camera
-      const processor = new MediaStreamTrackProcessor({ track: videoTrack })
+      // Wait for capture worker to be ready before creating processor
+      addLog('waiting for capture worker ready...')
+      captureWorker.postMessage({ type: 'ping', muxerPort: channel.port1 }, [channel.port1])
 
-      // Start capture worker with readable stream and muxer port
-      addLog('starting capture worker')
-      captureWorker.postMessage(
-        {
-          type: 'start',
-          readable: processor.readable,
-          muxerPort: channel.port1,
-        },
-        [processor.readable, channel.port1]
-      )
+      // The 'ready' handler will create the processor and start capture
+      // This ensures no frames are dropped during worker module loading
 
       setIsRecording(true)
       setStatus('recording...')
