@@ -14,6 +14,7 @@ export interface Slot {
   load(blob: Blob): Promise<void>
   clear(): void
   hasClip(): boolean
+  isLoading(): boolean
 
   // Preview
   setPreviewSource(stream: MediaStream | null): void
@@ -80,6 +81,10 @@ export function createSlot(options: CreateSlotOptions): Slot {
 
   function hasClip(): boolean {
     return !!loadAction.result()
+  }
+
+  function isLoading(): boolean {
+    return loadAction.pending()
   }
 
   function setPreviewSource(stream: MediaStream | null): void {
@@ -166,6 +171,7 @@ export function createSlot(options: CreateSlotOptions): Slot {
     load,
     clear,
     hasClip,
+    isLoading,
     setPreviewSource,
     setVolume,
     setPan,

@@ -18,6 +18,7 @@ import { getProjectByRkey, getStemBlob, publishProject } from '~/lib/atproto/cru
 import { createAction } from '~/lib/create-action'
 import { createDebugInfo } from '~/lib/create-debug-info'
 import { createRecorder, requestMediaAccess } from '~/lib/create-recorder'
+import { createResourceMap } from '~/lib/create-resource-map'
 import { createPlayer } from './create-player'
 
 const log = debug('editor', false)
@@ -155,22 +156,19 @@ export function createEditor(options: CreateEditorOptions) {
     () => [],
   )
 
-  // Derive blob resource for each clip (chained async derivation)
-  const stemBlobResources = createMemo(
-    mapArray(clipsWithStems, clip => {
-      const [blob] = createResource(
-        every(options.agent, () => clip.stem.uri),
-        ([agent, stemUri]) => {
-          try {
-            return getStemBlob(agent, stemUri)
-          } catch (err) {
-            console.error(`Failed to fetch stem for clip ${clip.id}:`, err)
-            return null
-          }
-        },
-      )
-      return { clipId: clip.id, blob, duration: clip.duration }
-    }),
+  // Resource map for stem blobs - fine-grained reactivity per clipId
+  const stemBlobs = createResourceMap(
+    () => clipsWithStems().map(clip => [clip.id, clip] as const),
+    async (clipId, clip) => {
+      const agent = options.agent()
+      if (!agent) return null
+      try {
+        return await getStemBlob(agent, clip.stem.uri)
+      } catch (err) {
+        console.error(`Failed to fetch stem for clip ${clipId}:`, err)
+        return null
+      }
+    },
   )
 
   // Derived state
@@ -268,12 +266,9 @@ export function createEditor(options: CreateEditorOptions) {
   }
 
   // Helper to get blob by clipId (from remote stems or local recordings)
+  // Uses fine-grained access - only subscribes to the specific clipId
   function getClipBlob(clipId: string): Blob | undefined {
-    const stemResource = stemBlobResources().find(r => r.clipId === clipId)
-    if (stemResource) {
-      return stemResource.blob() ?? undefined
-    }
-    return getLocalClipBlob(clipId)
+    return stemBlobs.get(clipId) ?? localClips[clipId]?.blob
   }
 
   // Preview action - requests media access and sets up preview stream
@@ -377,50 +372,53 @@ export function createEditor(options: CreateEditorOptions) {
     return result.uri.split('/').pop()
   })
 
+  // Load clips into player - each track has its own effect for fine-grained reactivity
   whenEffect(player, player => {
-    createEffect(() => {
-      // Load clips into player when project store changes
-      const tracks = project.tracks
-      log('effect: checking clips to load', { numTracks: tracks.length })
+    const trackIndices = [0, 1, 2, 3] as const
 
-      for (let i = 0; i < 4; i++) {
-        const trackId = `track-${i}`
-        const track = tracks.find(t => t.id === trackId)
-        const clip = track?.clips[0]
+    createEffect(
+      mapArray(
+        () => trackIndices,
+        trackIndex => {
+          const trackId = `track-${trackIndex}`
 
-        if (clip) {
-          const blob = getClipBlob(clip.id)
-          if (blob && !player.hasClip(i)) {
-            log('effect: loading clip into player', { trackIndex: i, clipId: clip.id })
-            player.loadClip(i, blob).catch(err => {
-              console.error(`Failed to load clip for track ${i}:`, err)
-            })
-          }
-        } else if (player.hasClip(i)) {
-          log('effect: clearing clip from player', { trackIndex: i })
-          player.clearClip(i)
-        }
-      }
+          // Effect for loading/clearing clips
+          createEffect(() => {
+            const track = project.tracks.find(t => t.id === trackId)
+            const clip = track?.clips[0]
 
-      // Initialize volume/pan from project store
-      createEffect(() => {
-        for (let i = 0; i < 4; i++) {
-          const trackId = `track-${i}`
-          const pipeline = getTrackPipeline(trackId)
-
-          for (let j = 0; j < pipeline.length; j++) {
-            const effect = pipeline[j]
-            const value = getEffectValue(trackId, j)
-
-            if (effect.type === 'audio.gain') {
-              player.setVolume(i, value)
-            } else if (effect.type === 'audio.pan') {
-              player.setPan(i, (value - 0.5) * 2)
+            if (clip) {
+              const blob = getClipBlob(clip.id)
+              if (blob && !player.hasClip(trackIndex) && !player.isLoading(trackIndex)) {
+                log('effect: loading clip into player', { trackIndex, clipId: clip.id })
+                player.loadClip(trackIndex, blob).catch(err => {
+                  console.error(`Failed to load clip for track ${trackIndex}:`, err)
+                })
+              }
+            } else if (player.hasClip(trackIndex)) {
+              log('effect: clearing clip from player', { trackIndex })
+              player.clearClip(trackIndex)
             }
-          }
-        }
-      })
-    })
+          })
+
+          // Effect for volume/pan
+          createEffect(() => {
+            const pipeline = getTrackPipeline(trackId)
+
+            for (let j = 0; j < pipeline.length; j++) {
+              const effect = pipeline[j]
+              const value = getEffectValue(trackId, j)
+
+              if (effect.type === 'audio.gain') {
+                player.setVolume(trackIndex, value)
+              } else if (effect.type === 'audio.pan') {
+                player.setPan(trackIndex, (value - 0.5) * 2)
+              }
+            }
+          })
+        },
+      ),
+    )
   })
 
   createEffect(() => getMasterMixer().setMasterVolume(masterVolume()))
@@ -440,7 +438,7 @@ export function createEditor(options: CreateEditorOptions) {
     hasAnyRecording,
     isPlayerLoading: () => player.loading,
     isPreRendering: () => player()?.preRenderer.isRendering() ?? false,
-    isProjectLoading: () => projectRecord.loading || stemBlobResources().some(r => r.blob.loading),
+    isProjectLoading: () => projectRecord.loading || stemBlobs.loading(),
     isPublishing: publishAction.pending,
     isRecording,
     isSelectedTrack,

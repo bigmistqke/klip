@@ -37,6 +37,8 @@ export interface PlayerActions {
   clearClip: (trackIndex: number) => void
   /** Check if track has a clip */
   hasClip: (trackIndex: number) => boolean
+  /** Check if track is currently loading a clip */
+  isLoading: (trackIndex: number) => boolean
   /** Set preview stream for recording */
   setPreviewSource: (trackIndex: number, stream: MediaStream | null) => void
   /** Set track volume */
@@ -251,6 +253,10 @@ export async function createPlayer(width: number, height: number): Promise<Playe
     return slots[trackIndex].hasClip()
   }
 
+  function isLoading(trackIndex: number): boolean {
+    return slots[trackIndex].isLoading()
+  }
+
   function setPreviewSource(trackIndex: number, stream: MediaStream | null): void {
     slots[trackIndex].setPreviewSource(stream)
   }
@@ -283,6 +289,7 @@ export async function createPlayer(width: number, height: number): Promise<Playe
     loadClip,
     clearClip,
     hasClip,
+    isLoading,
     setPreviewSource,
     setVolume: (trackIndex, value) => slots[trackIndex].setVolume(value),
     setPan: (trackIndex, value) => slots[trackIndex].setPan(value),
