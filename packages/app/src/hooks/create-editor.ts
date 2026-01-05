@@ -210,7 +210,7 @@ export function createEditor(options: CreateEditorOptions) {
   })
 
   // Publish action - uploads clips and publishes project
-  const publishAction = createAction(async (_: void) => {
+  const publishAction = createAction(async () => {
     const currentAgent = options.agent()
     if (!currentAgent) {
       throw new Error('Please sign in to publish')
@@ -334,7 +334,7 @@ export function createEditor(options: CreateEditorOptions) {
 
       if (_player && !_player.hasClip(trackIndex)) {
         setSelectedTrack(trackIndex)
-        previewAction.submit(trackIndex)
+        previewAction(trackIndex).catch(() => {})
       }
     },
 
@@ -344,7 +344,7 @@ export function createEditor(options: CreateEditorOptions) {
       if (stopRecordingAction.pending()) return
 
       if (isRecording()) {
-        stopRecordingAction.submit(trackIndex)
+        stopRecordingAction(trackIndex).catch(() => {})
       } else {
         startRecording()
       }
@@ -403,7 +403,7 @@ export function createEditor(options: CreateEditorOptions) {
     },
 
     publish() {
-      publishAction.submit()
+      return publishAction()
     },
 
     toggleLoop() {

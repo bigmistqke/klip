@@ -227,8 +227,8 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   function render(playbacks: (Playback | null)[], compositor: WorkerCompositor) {
     // Clear any existing pre-render first
     invalidate()
-    // Submit the action
-    renderAction.submit({ playbacks, compositor })
+    // Call the action
+    renderAction({ playbacks, compositor }).catch(() => {})
   }
 
   function tick(time: number, playing: boolean): VideoFrame | null {

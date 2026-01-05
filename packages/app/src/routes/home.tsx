@@ -29,7 +29,7 @@ export default function Home() {
     startTransition(() => refetch())
   }
 
-  const cleanupAction = createAction(async (_: void) => {
+  const cleanupAction = createAction(async () => {
     const currentAgent = agent()
     if (!currentAgent) return null
     const deleted = await deleteOrphanedStems(currentAgent)
@@ -83,7 +83,7 @@ export default function Home() {
         <button
           type="button"
           class={styles.cleanupButton}
-          onClick={() => cleanupAction.submit()}
+          onClick={() => cleanupAction()}
           disabled={cleanupAction.pending()}
         >
           {cleanupAction.pending() ? 'Cleaning up...' : 'Cleanup orphaned stems'}

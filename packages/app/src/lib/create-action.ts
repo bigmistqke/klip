@@ -1,5 +1,11 @@
 import { createSignal, type Accessor } from 'solid-js'
-import { createCancellableResource, type CancellableResourceFetcher } from './create-cancellable-resource'
+
+export class CancelledError extends Error {
+  constructor() {
+    super('Action was cancelled')
+    this.name = 'CancelledError'
+  }
+}
 
 export interface ActionContext {
   signal: AbortSignal
@@ -7,9 +13,11 @@ export interface ActionContext {
 
 export type ActionFetcher<T, R> = (args: T, context: ActionContext) => Promise<R>
 
-export interface Action<T, R> {
-  /** Call the action with arguments */
-  submit: (args: T) => void
+export type ActionFn<T, R> = [T] extends [undefined]
+  ? () => Promise<R>
+  : (args: T) => Promise<R>
+
+export type Action<T, R> = ActionFn<T, R> & {
   /** Whether the action is currently running */
   pending: Accessor<boolean>
   /** The result of the last successful invocation */
@@ -23,34 +31,73 @@ export interface Action<T, R> {
 }
 
 /**
- * Creates an async action that can be called imperatively.
- * Wraps createCancellableResource for Suspense integration.
+ * Creates an async action that can be called directly and awaited.
  *
- * - Calling `submit()` while pending automatically cancels the previous invocation
+ * - Calling while pending automatically cancels the previous invocation
+ * - Cancelled calls reject with CancelledError
  * - Provides `pending`, `result`, and `error` state
  * - Pass `signal` to the fetcher for cancellation support
  */
-export function createAction<T, R>(fetcher: ActionFetcher<T, R>): Action<T, R> {
-  const [args, setArgs] = createSignal<T | undefined>(undefined, { equals: false })
+export function createAction<T = undefined, R = void>(
+  fetcher: ActionFetcher<T, R>
+): Action<T, R> {
+  const [pending, setPending] = createSignal(false)
+  const [result, setResult] = createSignal<R | undefined>(undefined)
+  const [error, setError] = createSignal<unknown>(undefined)
 
-  const resourceFetcher: CancellableResourceFetcher<T, R> = (args, context) => fetcher(args, context)
+  let abortController: AbortController | null = null
 
-  const [resource, { mutate, cancel }] = createCancellableResource(args, resourceFetcher)
-
-  function submit(newArgs: T) {
-    setArgs(() => newArgs)
+  function cancel() {
+    if (abortController) {
+      abortController.abort()
+      abortController = null
+    }
   }
 
   function clear() {
-    mutate(undefined)
+    setResult(undefined)
+    setError(undefined)
   }
 
-  return {
-    submit,
-    pending: () => resource.loading,
-    result: resource,
-    error: () => resource.error,
+  async function action(args?: T): Promise<R> {
+    // Cancel any ongoing invocation
+    cancel()
+
+    // Create new abort controller
+    abortController = new AbortController()
+    const { signal } = abortController
+
+    setPending(true)
+    setError(undefined)
+
+    try {
+      const value = await fetcher(args as T, { signal })
+
+      // Check if we were cancelled during execution
+      if (signal.aborted) {
+        throw new CancelledError()
+      }
+
+      setResult(() => value)
+      return value
+    } catch (err) {
+      if (signal.aborted) {
+        throw new CancelledError()
+      }
+      setError(err)
+      throw err
+    } finally {
+      if (!signal.aborted) {
+        setPending(false)
+      }
+    }
+  }
+
+  return Object.assign(action, {
+    pending,
+    result,
+    error,
     cancel,
     clear,
-  }
+  }) as Action<T, R>
 }
