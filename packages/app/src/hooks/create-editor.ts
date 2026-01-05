@@ -3,21 +3,14 @@ import { every, whenEffect, whenMemo } from '@bigmistqke/solid-whenever'
 import type { AudioEffect, Project, Track } from '@eddy/lexicons'
 import { getMasterMixer, resumeAudioContext } from '@eddy/mixer'
 import { debug } from '@eddy/utils'
-import {
-  createEffect,
-  createResource,
-  createSelector,
-  createSignal,
-  mapArray,
-  onCleanup,
-  type Accessor,
-} from 'solid-js'
+import { createEffect, createSelector, createSignal, mapArray, type Accessor } from 'solid-js'
 import { createStore, produce } from 'solid-js/store'
 import { getProjectByRkey, getStemBlob, publishProject } from '~/lib/atproto/crud'
 import { createAction } from '~/lib/create-action'
-import { createDebugInfo } from '~/lib/create-debug-info'
+import { createDebugInfo as initDebugInfo } from '~/lib/create-debug-info'
 import { createRecorder, requestMediaAccess } from '~/lib/create-recorder'
 import { createResourceMap } from '~/lib/create-resource-map'
+import { resource } from '~/lib/resource'
 import { createPlayer } from './create-player'
 
 const log = debug('editor', false)
@@ -112,29 +105,27 @@ export function createEditor(options: CreateEditorOptions) {
   const isRecording = () => !!startRecordingAction.result()
 
   // Create player as a resource (waits for canvas to be available)
-  const [player] = createResource(
+  const [player] = resource(
     every(
       () => options.canvas(),
       () => project.canvas.width,
       () => project.canvas.height,
     ),
-    async ([canvas, width, height]) => {
-      const _player = await createPlayer(canvas, width, height)
-      ;(window as any).__EDDY_DEBUG__ = createDebugInfo(_player)
+    async ([canvas, width, height], { onCleanup }) => {
+      const result = await createPlayer(canvas, width, height)
+      initDebugInfo(result)
 
-      // NOTE: this onCleanup will not run as expected
       onCleanup(() => {
-        _player.destroy()
+        result.destroy()
         previewAction.clear()
-        delete (window as any).__EDDY_DEBUG__
       })
 
-      return _player
+      return result
     },
   )
 
   // Resource: Load project record when rkey is provided
-  const [projectRecord] = createResource(
+  const [projectRecord] = resource(
     every(options.agent, () => options.rkey),
     async ([agent, rkey]) => {
       const record = await getProjectByRkey(agent, rkey, options.handle)

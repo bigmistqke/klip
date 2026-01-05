@@ -1,5 +1,6 @@
-import { createEffect, createResource, type Accessor, type Resource } from 'solid-js'
+import { createEffect, type Accessor, type Resource } from 'solid-js'
 import { createStore } from 'solid-js/store'
+import { resource } from './resource'
 
 interface ResourceEntry<V> {
   resource: Resource<V | null>
@@ -33,8 +34,8 @@ export function createResourceMap<K extends string, E, V>(
 
     for (const [key, entry] of currentEntries) {
       if (!store[key]) {
-        const [resource] = createResource(() => fetcher(key, entry))
-        setStore(key, { resource })
+        const [res] = resource(() => fetcher(key, entry))
+        setStore(key, { resource: res })
       }
     }
   })

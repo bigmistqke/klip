@@ -11,8 +11,8 @@ export interface DebugInfo {
   downloadPreRender: () => void
 }
 
-export function createDebugInfo(player: Player): DebugInfo {
-  return {
+export function createDebugInfo(player: Player) {
+  ;(window as any).__EDDY_DEBUG__ = {
     player,
     getPlaybackStates: () => {
       const states = []

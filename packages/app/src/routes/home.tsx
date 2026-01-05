@@ -1,15 +1,16 @@
 import { A } from '@solidjs/router'
 import { FiTrash2 } from 'solid-icons/fi'
-import { createResource, For, Show, useTransition } from 'solid-js'
-import { createAction } from '~/lib/create-action'
+import { For, Show, useTransition } from 'solid-js'
 import { useAuth } from '~/lib/atproto/auth-context'
 import { deleteOrphanedStems, deleteProject, listProjects } from '~/lib/atproto/crud'
+import { createAction } from '~/lib/create-action'
+import { resource } from '~/lib/resource'
 import styles from './home.module.css'
 
 export default function Home() {
   const { agent } = useAuth()
 
-  const [projects, { refetch }] = createResource(
+  const [projects, { refetch }] = resource(
     () => agent(),
     async currentAgent => {
       if (!currentAgent) return []
