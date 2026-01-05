@@ -1,6 +1,6 @@
 import type { Agent } from '@atproto/api'
-import type { AudioEffect, Project, Track } from '@eddy/lexicons'
 import { every, whenEffect, whenMemo } from '@bigmistqke/solid-whenever'
+import type { AudioEffect, Project, Track } from '@eddy/lexicons'
 import { getMasterMixer, resumeAudioContext } from '@eddy/mixer'
 import { debug } from '@eddy/utils'
 import {
@@ -17,7 +17,7 @@ import { createStore, produce } from 'solid-js/store'
 import { getProjectByRkey, getStemBlob, publishProject } from '~/lib/atproto/crud'
 import { createAction } from '~/lib/create-action'
 import { createDebugInfo } from '~/lib/create-debug-info'
-import { createRecorder, requestMediaAccess } from '~/lib/recorder'
+import { createRecorder, requestMediaAccess } from '~/lib/create-recorder'
 import { createPlayer } from './create-player'
 
 const log = debug('editor', false)
@@ -119,6 +119,80 @@ export function createEditor(options: CreateEditorOptions) {
   const isSelectedTrack = createSelector(selectedTrackIndex)
   const isRecording = () => startRecordingAction.result() !== null
 
+  // Create player as a resource
+  const [player] = createResource(
+    () => ({
+      width: store.project.canvas.width,
+      height: store.project.canvas.height,
+    }),
+    async ({ width, height }) => {
+      const _player = await createPlayer(width, height)
+      options.container.appendChild(_player.canvas)
+      ;(window as any).__EDDY_DEBUG__ = createDebugInfo(_player)
+
+      onCleanup(() => {
+        _player.destroy()
+        previewAction.clear()
+        delete (window as any).__EDDY_DEBUG__
+      })
+
+      return _player
+    },
+  )
+
+  // Resource: Load project record when rkey is provided
+  const [projectRecord] = createResource(
+    every(options.agent, () => options.rkey),
+    async ([agent, rkey]) => {
+      const record = await getProjectByRkey(agent, rkey, options.handle)
+      setStore('project', record.value)
+      setStore('remoteUri', record.uri)
+      return record
+    },
+  )
+
+  // Derive clips that have stems from project record
+  const clipsWithStems = whenMemo(
+    projectRecord,
+    record =>
+      record.value.tracks
+        .flatMap(track => track.clips)
+        .filter(
+          (clip): clip is typeof clip & { stem: NonNullable<typeof clip.stem> } => !!clip.stem,
+        ),
+    () => [],
+  )
+
+  // Derive blob resource for each clip (chained async derivation)
+  const stemBlobResources = createMemo(
+    mapArray(clipsWithStems, clip => {
+      const [blob] = createResource(
+        every(options.agent, () => clip.stem.uri),
+        ([agent, stemUri]) => {
+          try {
+            return getStemBlob(agent, stemUri)
+          } catch (err) {
+            console.error(`Failed to fetch stem for clip ${clip.id}:`, err)
+            return null
+          }
+        },
+      )
+      return { clipId: clip.id, blob, duration: clip.duration }
+    }),
+  )
+
+  // Derived state
+  const hasAnyRecording = whenMemo(
+    player,
+    player => {
+      for (let i = 0; i < 4; i++) {
+        if (player.hasClip(i)) return true
+      }
+      return false
+    },
+    () => false,
+  )
+
   // Project store actions
   function setTitle(title: string) {
     setStore('project', 'title', title)
@@ -203,126 +277,6 @@ export function createEditor(options: CreateEditorOptions) {
   function getLocalClipBlob(clipId: string): Blob | undefined {
     return store.local.clips[clipId]?.blob
   }
-
-  // Create player as a resource
-  const [player] = createResource(
-    () => ({
-      width: store.project.canvas.width,
-      height: store.project.canvas.height,
-    }),
-    async ({ width, height }) => {
-      const _player = await createPlayer(width, height)
-      options.container.appendChild(_player.canvas)
-      ;(window as any).__EDDY_DEBUG__ = createDebugInfo(_player)
-
-      onCleanup(() => {
-        _player.destroy()
-        previewAction.clear()
-        delete (window as any).__EDDY_DEBUG__
-      })
-
-      return _player
-    },
-  )
-
-  // Resource: Load project record when rkey is provided
-  const [projectRecord] = createResource(
-    every(options.agent, () => options.rkey),
-    async ([agent, rkey]) => {
-      const record = await getProjectByRkey(agent, rkey, options.handle)
-      setStore('project', record.value)
-      setStore('remoteUri', record.uri)
-      return record
-    },
-  )
-
-  // Derive clips that have stems from project record
-  const clipsWithStems = whenMemo(
-    projectRecord,
-    record =>
-      record.value.tracks
-        .flatMap(track => track.clips)
-        .filter(
-          (clip): clip is typeof clip & { stem: NonNullable<typeof clip.stem> } => !!clip.stem,
-        ),
-    () => [],
-  )
-
-  // Derive blob resource for each clip (chained async derivation)
-  const stemBlobResources = createMemo(
-    mapArray(clipsWithStems, clip => {
-      const [blob] = createResource(
-        every(options.agent, () => clip.stem.uri),
-        ([agent, stemUri]) => {
-          try {
-            return getStemBlob(agent, stemUri)
-          } catch (err) {
-            console.error(`Failed to fetch stem for clip ${clip.id}:`, err)
-            return null
-          }
-        },
-      )
-      return { clipId: clip.id, blob, duration: clip.duration }
-    }),
-  )
-
-  // Derived state
-  const hasAnyRecording = whenMemo(
-    player,
-    player => {
-      for (let i = 0; i < 4; i++) {
-        if (player.hasClip(i)) return true
-      }
-      return false
-    },
-    () => false,
-  )
-
-  whenEffect(player, player => {
-    createEffect(() => {
-      // Load clips into player when project store changes
-      const tracks = store.project.tracks
-      log('effect: checking clips to load', { numTracks: tracks.length })
-
-      for (let i = 0; i < 4; i++) {
-        const trackId = `track-${i}`
-        const track = tracks.find(t => t.id === trackId)
-        const clip = track?.clips[0]
-
-        if (clip) {
-          const blob = getClipBlob(clip.id)
-          if (blob && !player.hasClip(i)) {
-            log('effect: loading clip into player', { trackIndex: i, clipId: clip.id })
-            player.loadClip(i, blob).catch(err => {
-              console.error(`Failed to load clip for track ${i}:`, err)
-            })
-          }
-        } else if (player.hasClip(i)) {
-          log('effect: clearing clip from player', { trackIndex: i })
-          player.clearClip(i)
-        }
-      }
-
-      // Initialize volume/pan from project store
-      createEffect(() => {
-        for (let i = 0; i < 4; i++) {
-          const trackId = `track-${i}`
-          const pipeline = getTrackPipeline(trackId)
-
-          for (let j = 0; j < pipeline.length; j++) {
-            const effect = pipeline[j]
-            const value = getEffectValue(trackId, j)
-
-            if (effect.type === 'audio.gain') {
-              player.setVolume(i, value)
-            } else if (effect.type === 'audio.pan') {
-              player.setPan(i, (value - 0.5) * 2)
-            }
-          }
-        }
-      })
-    })
-  })
 
   // Helper to get blob by clipId (from remote stems or local recordings)
   function getClipBlob(clipId: string): Blob | undefined {
@@ -434,54 +388,88 @@ export function createEditor(options: CreateEditorOptions) {
     return result.uri.split('/').pop()
   })
 
-  const canPublish = whenMemo(player, player => {
-    return (
-      !isRecording() &&
-      !player.isPlaying() &&
-      !publishAction.pending() &&
-      hasAnyRecording() &&
-      !!options.agent()
-    )
+  whenEffect(player, player => {
+    createEffect(() => {
+      // Load clips into player when project store changes
+      const tracks = store.project.tracks
+      log('effect: checking clips to load', { numTracks: tracks.length })
+
+      for (let i = 0; i < 4; i++) {
+        const trackId = `track-${i}`
+        const track = tracks.find(t => t.id === trackId)
+        const clip = track?.clips[0]
+
+        if (clip) {
+          const blob = getClipBlob(clip.id)
+          if (blob && !player.hasClip(i)) {
+            log('effect: loading clip into player', { trackIndex: i, clipId: clip.id })
+            player.loadClip(i, blob).catch(err => {
+              console.error(`Failed to load clip for track ${i}:`, err)
+            })
+          }
+        } else if (player.hasClip(i)) {
+          log('effect: clearing clip from player', { trackIndex: i })
+          player.clearClip(i)
+        }
+      }
+
+      // Initialize volume/pan from project store
+      createEffect(() => {
+        for (let i = 0; i < 4; i++) {
+          const trackId = `track-${i}`
+          const pipeline = getTrackPipeline(trackId)
+
+          for (let j = 0; j < pipeline.length; j++) {
+            const effect = pipeline[j]
+            const value = getEffectValue(trackId, j)
+
+            if (effect.type === 'audio.gain') {
+              player.setVolume(i, value)
+            } else if (effect.type === 'audio.pan') {
+              player.setPan(i, (value - 0.5) * 2)
+            }
+          }
+        }
+      })
+    })
   })
 
+  createEffect(() => getMasterMixer().setMasterVolume(masterVolume()))
+
   return {
-    // Store (read-only access)
+    canPublish() {
+      return (
+        !isRecording() &&
+        !player()?.isPlaying() &&
+        !publishAction.pending() &&
+        hasAnyRecording() &&
+        !!options.agent()
+      )
+    },
+    getEffectValue,
+    getTrackPipeline,
+    hasAnyRecording,
+    isPlayerLoading: () => player.loading,
+    isPreRendering: () => player()?.preRenderer.isRendering() ?? false,
+    isProjectLoading: () => projectRecord.loading || stemBlobResources().some(r => r.blob.loading),
+    isPublishing: publishAction.pending,
+    isRecording,
+    isSelectedTrack,
+    loopEnabled: () => player()?.loop() ?? false,
+    masterVolume,
+    player,
+    preRenderProgress: () => player()?.preRenderer.progress() ?? 0,
+    previewPending: previewAction.pending,
+    publishError: publishAction.error,
+    selectedTrack: selectedTrackIndex,
+    setMasterVolume,
+    setTitle,
+    stopRecordingPending: stopRecordingAction.pending,
     store,
 
-    // Player
-    player,
-
-    // State (all reactive)
-    isRecording,
-    selectedTrack: selectedTrackIndex,
-    masterVolume,
-    isSelectedTrack,
-    hasAnyRecording,
-    canPublish,
-
-    // Loading states
-    isPlayerLoading: () => player.loading,
-    isProjectLoading: () => projectRecord.loading || stemBlobResources().some(r => r.blob.loading),
-
-    // Action states
-    previewPending: previewAction.pending,
-    stopRecordingPending: stopRecordingAction.pending,
-    isPublishing: publishAction.pending,
-    publishError: publishAction.error,
-
-    // Pre-render state
-    isPreRendering: () => player()?.preRenderer.isRendering() ?? false,
-    preRenderProgress: () => player()?.preRenderer.progress() ?? 0,
-
-    // Loop state
-    loopEnabled: () => player()?.loop() ?? false,
-
-    // Project helpers
-    getTrackPipeline,
-    getEffectValue,
-
-    // Actions
-    setTitle,
+    publish() {
+      return publishAction()
+    },
 
     async stop() {
       await player()?.stop()
@@ -564,15 +552,6 @@ export function createEditor(options: CreateEditorOptions) {
         setEffectValue(trackId, panIndex, (value + 1) / 2)
       }
       player()?.setPan(index, value)
-    },
-
-    updateMasterVolume(value: number) {
-      setMasterVolume(value)
-      getMasterMixer().setMasterVolume(value)
-    },
-
-    publish() {
-      return publishAction()
     },
 
     toggleLoop() {

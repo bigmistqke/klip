@@ -1,7 +1,7 @@
 import { FiCircle, FiPause, FiPlay, FiRepeat, FiSquare, FiUpload, FiVolume2 } from 'solid-icons/fi'
 import { type Component, For, Show } from 'solid-js'
-import { useAuth } from '~/lib/atproto/auth-context'
 import { createEditor } from '~/hooks'
+import { useAuth } from '~/lib/atproto/auth-context'
 import styles from './Editor.module.css'
 import { Track } from './Track'
 
@@ -110,7 +110,7 @@ export const Editor: Component<EditorProps> = props => {
             max="1"
             step="0.01"
             value={editor.masterVolume()}
-            onInput={e => editor.updateMasterVolume(parseFloat(e.target.value))}
+            onInput={e => editor.setMasterVolume(parseFloat(e.target.value))}
           />
         </label>
         <button
