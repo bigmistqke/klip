@@ -4,7 +4,6 @@
  * Manages all pre-render state with signals and handles the pre-rendered playback lifecycle.
  */
 
-import type { Demuxer } from '@eddy/codecs'
 import type { Playback } from '@eddy/playback'
 import { createPlayback } from '@eddy/playback'
 import { debug } from '@eddy/utils'
@@ -33,7 +32,6 @@ interface RenderParams {
 interface RenderResult {
   blob: Blob
   playback: Playback
-  demuxer: Demuxer
 }
 
 export interface PreRendererState {
@@ -82,6 +80,14 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   // The render action
   const renderAction = createAction<RenderParams, RenderResult | null>(
     async ({ playbacks, compositor }, { signal }) => {
+      // Track resources for cleanup
+      let cleanupFn: (() => void) | null = null
+
+      // Register cleanup - will be called when action is cancelled, cleared, or replaced
+      onCleanup(() => {
+        cleanupFn?.()
+      })
+
       // Check preconditions
       const hasContent = playbacks.some(playback => playback !== null)
       if (!hasContent) {
@@ -195,10 +201,17 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
         const renderedPlayback = await createPlayback(demuxer)
         await renderedPlayback.seek(0)
 
+        // Set cleanup to destroy resources when action is disposed
+        cleanupFn = () => {
+          log('cleaning up playback and demuxer')
+          renderedPlayback.destroy()
+          demuxer.destroy()
+        }
+
         setProgress(1)
         log('playback ready')
 
-        return { blob: renderedBlob, playback: renderedPlayback, demuxer }
+        return { blob: renderedBlob, playback: renderedPlayback }
       } catch (err) {
         log('error', { error: err })
         throw err
@@ -207,17 +220,9 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   )
 
   // Derived state from action
-  const isRendering = renderAction.pending
-  const hasPreRender = () => renderAction.result() !== null
   const playback = () => renderAction.result()?.playback ?? null
-  const blob = () => renderAction.result()?.blob ?? null
 
   function invalidate() {
-    const result = renderAction.result()
-    if (result) {
-      result.playback.destroy()
-      result.demuxer.destroy()
-    }
     renderAction.clear()
     setProgress(0)
     lastSentTimestamp = null
@@ -228,7 +233,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
     // Clear any existing pre-render first
     invalidate()
     // Call the action
-    renderAction({ playbacks, compositor }).catch(() => {})
+    renderAction({ playbacks, compositor }).catch(() => { })
   }
 
   function tick(time: number, playing: boolean): VideoFrame | null {
@@ -255,10 +260,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   }
 
   function resetForLoop(time: number) {
-    const _playback = playback()
-    if (_playback) {
-      _playback.resetForLoop(time)
-    }
+    playback()?.resetForLoop(time)
     lastSentTimestamp = null
   }
 
@@ -270,16 +272,16 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
 
   return {
     // State
-    isRendering,
-    progress,
-    hasPreRender,
+    blob: () => renderAction.result()?.blob ?? null,
+    hasPreRender: () => renderAction.result() !== null,
+    isRendering: renderAction.pending,
     playback,
-    blob,
+    progress,
     // Actions
-    render,
     cancel: renderAction.cancel,
     invalidate,
-    tick,
+    render,
     resetForLoop,
+    tick,
   }
 }

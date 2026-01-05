@@ -1,4 +1,4 @@
-import { createSignal, type Accessor } from 'solid-js'
+import { createRoot, createSignal, type Accessor } from 'solid-js'
 
 export class CancelledError extends Error {
   constructor() {
@@ -46,22 +46,32 @@ export function createAction<T = undefined, R = void>(
   const [error, setError] = createSignal<unknown>(undefined)
 
   let abortController: AbortController | null = null
+  let dispose: (() => void) | null = null
 
-  function cancel() {
+  function cleanup() {
+    if (dispose) {
+      dispose()
+      dispose = null
+    }
     if (abortController) {
       abortController.abort()
       abortController = null
     }
   }
 
+  function cancel() {
+    cleanup()
+  }
+
   function clear() {
+    cleanup()
     setResult(undefined)
     setError(undefined)
   }
 
   async function action(args?: T): Promise<R> {
-    // Cancel any ongoing invocation
-    cancel()
+    // Cleanup any ongoing invocation
+    cleanup()
 
     // Create new abort controller
     abortController = new AbortController()
@@ -70,27 +80,39 @@ export function createAction<T = undefined, R = void>(
     setPending(true)
     setError(undefined)
 
-    try {
-      const value = await fetcher(args as T, { signal })
+    // Run fetcher inside a reactive root so onCleanup works
+    const promise = new Promise<R>((resolve, reject) => {
+      dispose = createRoot(disposeFn => {
+        dispose = disposeFn
 
-      // Check if we were cancelled during execution
-      if (signal.aborted) {
-        throw new CancelledError()
-      }
+        fetcher(args as T, { signal })
+          .then(value => {
+            if (signal.aborted) {
+              reject(new CancelledError())
+            } else {
+              setResult(() => value)
+              resolve(value)
+            }
+          })
+          .catch(err => {
+            if (signal.aborted) {
+              reject(new CancelledError())
+            } else {
+              setError(err)
+              reject(err)
+            }
+          })
+          .finally(() => {
+            if (!signal.aborted) {
+              setPending(false)
+            }
+          })
 
-      setResult(() => value)
-      return value
-    } catch (err) {
-      if (signal.aborted) {
-        throw new CancelledError()
-      }
-      setError(err)
-      throw err
-    } finally {
-      if (!signal.aborted) {
-        setPending(false)
-      }
-    }
+        return disposeFn
+      })
+    })
+
+    return promise
   }
 
   return Object.assign(action, {

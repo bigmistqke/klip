@@ -186,12 +186,10 @@ export async function createPlayer(width: number, height: number): Promise<Playe
     log('play', { startTime })
 
     // Prepare all playbacks
-    const preparePromises = slots.map(slot => slot.prepareToPlay(startTime))
-    const preRenderedPlayback = preRenderer.playback()
-    if (preRenderedPlayback) {
-      preparePromises.push(preRenderedPlayback.prepareToPlay(startTime))
-    }
-    await Promise.all(preparePromises)
+    await Promise.all([
+      ...slots.map(slot => slot.prepareToPlay(startTime)),
+      preRenderer.playback()?.prepareToPlay(startTime)
+    ])
 
     // Start audio
     for (const slot of slots) {
