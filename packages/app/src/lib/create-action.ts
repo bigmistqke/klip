@@ -1,4 +1,4 @@
-import { createRoot, createSignal, type Accessor } from 'solid-js'
+import { createSignal, type Accessor } from 'solid-js'
 
 export class CancelledError extends Error {
   constructor() {
@@ -9,6 +9,8 @@ export class CancelledError extends Error {
 
 export interface ActionContext {
   signal: AbortSignal
+  /** Register a cleanup function to be called when action is cancelled/cleared/replaced */
+  onCleanup: (fn: () => void) => void
 }
 
 export type ActionFetcher<T, R> = (args: T, context: ActionContext) => Promise<R>
@@ -52,13 +54,23 @@ export function createAction<T = undefined, R = void>(
   const [error, setError] = createSignal<unknown>(undefined)
 
   let abortController: AbortController | null = null
-  let dispose: (() => void) | null = null
+  let cleanupFns: (() => void)[] = []
+
+  function registerCleanup(fn: () => void) {
+    cleanupFns.push(fn)
+  }
 
   function cleanup() {
-    if (dispose) {
-      dispose()
-      dispose = null
+    // Call registered cleanup functions
+    for (const fn of cleanupFns) {
+      try {
+        fn()
+      } catch (e) {
+        console.error('Cleanup error:', e)
+      }
     }
+    cleanupFns = []
+
     if (abortController) {
       abortController.abort()
       abortController = null
@@ -86,39 +98,26 @@ export function createAction<T = undefined, R = void>(
     setPending(true)
     setError(undefined)
 
-    // Run fetcher inside a reactive root so onCleanup works
-    const promise = new Promise<R>((resolve, reject) => {
-      dispose = createRoot(disposeFn => {
-        dispose = disposeFn
+    try {
+      const value = await fetcher(args as T, { signal, onCleanup: registerCleanup })
 
-        fetcher(args as T, { signal })
-          .then(value => {
-            if (signal.aborted) {
-              reject(new CancelledError())
-            } else {
-              setResult(() => value)
-              resolve(value)
-            }
-          })
-          .catch(err => {
-            if (signal.aborted) {
-              reject(new CancelledError())
-            } else {
-              setError(err)
-              reject(err)
-            }
-          })
-          .finally(() => {
-            if (!signal.aborted) {
-              setPending(false)
-            }
-          })
+      if (signal.aborted) {
+        throw new CancelledError()
+      }
 
-        return disposeFn
-      })
-    })
-
-    return promise
+      setResult(() => value)
+      return value
+    } catch (err) {
+      if (signal.aborted) {
+        throw new CancelledError()
+      }
+      setError(err)
+      throw err
+    } finally {
+      if (!signal.aborted) {
+        setPending(false)
+      }
+    }
   }
 
   async function tryAction(args?: T): Promise<R | undefined> {

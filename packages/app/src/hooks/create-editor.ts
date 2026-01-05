@@ -117,7 +117,7 @@ export function createEditor(options: CreateEditorOptions) {
   const [masterVolume, setMasterVolume] = createSignal(1)
 
   const isSelectedTrack = createSelector(selectedTrackIndex)
-  const isRecording = () => startRecordingAction.result() !== null
+  const isRecording = () => !!startRecordingAction.result()
 
   // Create player as a resource
   const [player] = createResource(
@@ -288,7 +288,7 @@ export function createEditor(options: CreateEditorOptions) {
   }
 
   // Preview action - requests media access and sets up preview stream
-  const previewAction = createAction(async (trackIndex: number) => {
+  const previewAction = createAction(async (trackIndex: number, { onCleanup }) => {
     await resumeAudioContext()
     const stream = await requestMediaAccess(true)
     if (stream) {

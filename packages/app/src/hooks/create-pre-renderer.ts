@@ -79,7 +79,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
 
   // The render action
   const renderAction = createAction<RenderParams, RenderResult | null>(
-    async ({ playbacks, compositor }, { signal }) => {
+    async ({ playbacks, compositor }, { signal, onCleanup }) => {
       // Track resources for cleanup
       let cleanupFn: (() => void) | null = null
 
@@ -273,7 +273,7 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   return {
     // State
     blob: () => renderAction.result()?.blob ?? null,
-    hasPreRender: () => renderAction.result() !== null,
+    hasPreRender: () => !!renderAction.result(),
     isRendering: renderAction.pending,
     playback,
     progress,
