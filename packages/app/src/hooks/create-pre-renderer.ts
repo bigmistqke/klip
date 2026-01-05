@@ -79,18 +79,20 @@ export function createPreRenderer(options: PreRenderOptions = {}): PreRenderer {
   // Frame tracking for tick()
   let lastSentTimestamp: number | null = null
 
+  // Source: only trigger when params exist and have content
+  const renderSource = () => {
+    const params = renderParams()
+    if (!params) return null
+    const hasContent = params.playbacks.some(playback => playback !== null)
+    if (!hasContent) return null
+    return params
+  }
+
   // The render resource with automatic abort management
   const [result, { mutate, cancel }] = createCancellableResource(
-    renderParams,
+    renderSource,
     async (params, { signal }): Promise<RenderResult | null> => {
       const { playbacks, compositor } = params
-
-      // Check if there's content to render
-      const hasContent = playbacks.some(playback => playback !== null)
-      if (!hasContent) {
-        log('render: no content')
-        return null
-      }
 
       // Find max duration
       let duration = 0
