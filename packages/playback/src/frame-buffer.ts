@@ -2,7 +2,7 @@ import type { DemuxedSample, Demuxer, VideoTrackInfo } from '@eddy/codecs'
 import { createVideoDecoder } from '@eddy/codecs'
 import { debug } from '@eddy/utils'
 
-const log = debug('frame-buffer', true)
+const log = debug('frame-buffer', false)
 
 /** Raw frame data stored as ArrayBuffer */
 export interface FrameData {
@@ -88,7 +88,7 @@ export async function createFrameBuffer(
   options: FrameBufferOptions = {},
 ): Promise<FrameBuffer> {
   const bufferId = frameBufferIdCounter++
-  const bufferLog = debug(`frame-buffer-${bufferId}`, true)
+  const bufferLog = debug(`frame-buffer-${bufferId}`, false)
   bufferLog('createFrameBuffer', { trackId: trackInfo.id, duration: trackInfo.duration })
 
   const bufferAhead = options.bufferAhead ?? 0.5
