@@ -1,5 +1,8 @@
 import { expose, rpc } from '@bigmistqke/rpc/messenger'
+import { debug } from '@eddy/utils'
 import type { MuxerFrameData, MuxerInitConfig } from './debug-muxer.worker'
+
+const log = debug('debug-capture', true)
 
 export interface CaptureWorkerMethods {
   /** Set the muxer port for forwarding frames (called before start) */
@@ -22,9 +25,11 @@ interface MuxerPortMethods {
   captureEnded(frameCount: number): void
 }
 
-let capturing = false
-let reader: ReadableStreamDefaultReader<VideoFrame> | null = null
-let muxer: ReturnType<typeof rpc<MuxerPortMethods>> | null = null
+/**********************************************************************************/
+/*                                                                                */
+/*                                      Utils                                     */
+/*                                                                                */
+/**********************************************************************************/
 
 async function copyFrameToBuffer(frame: VideoFrame): Promise<{
   buffer: ArrayBuffer
@@ -41,11 +46,21 @@ async function copyFrameToBuffer(frame: VideoFrame): Promise<{
   return { buffer, format, codedWidth, codedHeight }
 }
 
-const methods: CaptureWorkerMethods = {
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Methods                                    */
+/*                                                                                */
+/**********************************************************************************/
+
+let capturing = false
+let reader: ReadableStreamDefaultReader<VideoFrame> | null = null
+let muxer: ReturnType<typeof rpc<MuxerPortMethods>> | null = null
+
+expose<CaptureWorkerMethods>({
   setMuxerPort(port: MessagePort) {
     port.start()
     muxer = rpc<MuxerPortMethods>(port)
-    console.log('[debug-capture] received muxer port, created RPC proxy')
+    log('received muxer port, created RPC proxy')
   },
 
   async start(readable: ReadableStream<VideoFrame>) {
@@ -53,7 +68,7 @@ const methods: CaptureWorkerMethods = {
       throw new Error('No muxer - call setMuxerPort first')
     }
 
-    console.log('[debug-capture] start received, beginning capture')
+    log('start received, beginning capture')
 
     capturing = true
 
@@ -82,14 +97,14 @@ const methods: CaptureWorkerMethods = {
         })
         muxer.addFrame({ ...data, timestampSec: 0 })
         frameCount++
-        console.log('[debug-capture] capturing frames')
+        log('capturing frames')
       } else {
         // Check gap between frame1 and frame2
         const gap = (frame2.timestamp - frame1.timestamp) / 1_000_000
 
         if (gap > 0.5) {
           // Frame1 is stale - discard it, use frame2 as first
-          console.log(`[debug-capture] discarding stale frame, gap=${gap.toFixed(3)}s`)
+          console.log(`discarding stale frame, gap=${gap.toFixed(3)}s`)
           frame1.close()
           firstTimestamp = frame2.timestamp
           const data = await copyFrameToBuffer(frame2)
@@ -117,9 +132,7 @@ const methods: CaptureWorkerMethods = {
           muxer.addFrame({ ...data2, timestampSec: timestampSec2 })
           frameCount++
         }
-        console.log(
-          `[debug-capture] first frame ts=${(firstTimestamp / 1_000_000).toFixed(3)}s, capturing...`,
-        )
+        console.log(`first frame ts=${(firstTimestamp / 1_000_000).toFixed(3)}s, capturing...`)
       }
 
       // Continue with remaining frames
@@ -133,20 +146,18 @@ const methods: CaptureWorkerMethods = {
         frameCount++
       }
     } catch (err) {
-      console.error('[debug-capture] error:', err)
+      log('error:', err)
       throw err
     }
 
     // Signal end of stream
     muxer.captureEnded(frameCount)
-    console.log(`[debug-capture] done, ${frameCount} frames captured`)
+    console.log(`done, ${frameCount} frames captured`)
   },
 
   stop() {
     capturing = false
     reader?.cancel().catch(() => {})
-    console.log('[debug-capture] stop received')
+    log('stop received')
   },
-}
-
-expose(methods)
+})

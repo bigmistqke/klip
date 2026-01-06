@@ -37,18 +37,43 @@ export interface MuxerWorkerMethods {
   reset(): void
 }
 
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Methods                                    */
+/*                                                                                */
+/**********************************************************************************/
+
 // Worker state
 let muxer: Muxer | null = null
 let capturedFrameCount = 0
 
-const methods: MuxerWorkerMethods = {
+function addVideoFrame(data: VideoFrameData) {
+  if (!muxer) {
+    log('not initialized, dropping video frame')
+    return
+  }
+  muxer.addVideoFrame(data)
+}
+
+function addAudioFrame(data: AudioFrameData) {
+  if (!muxer) {
+    log('not initialized, dropping audio frame')
+    return
+  }
+  muxer.addAudioFrame(data)
+}
+
+expose<MuxerWorkerMethods>({
+  addVideoFrame,
+  addAudioFrame,
+
   setCapturePort(port: MessagePort) {
     log('received capture port')
     // Expose methods on this port for capture worker to call
     expose(
       {
-        addVideoFrame: methods.addVideoFrame,
-        addAudioFrame: methods.addAudioFrame,
+        addVideoFrame,
+        addAudioFrame,
         captureEnded: (frameCount: number) => {
           capturedFrameCount = frameCount
           log('capture ended', { frameCount: capturedFrameCount })
@@ -65,22 +90,6 @@ const methods: MuxerWorkerMethods = {
     muxer = createMuxer({ videoCodec: 'vp9', videoBitrate: 2_000_000, audio: true })
     await muxer.init()
     log('pre-initialization complete')
-  },
-
-  addVideoFrame(data: VideoFrameData) {
-    if (!muxer) {
-      log('not initialized, dropping video frame')
-      return
-    }
-    muxer.addVideoFrame(data)
-  },
-
-  addAudioFrame(data: AudioFrameData) {
-    if (!muxer) {
-      log('not initialized, dropping audio frame')
-      return
-    }
-    muxer.addAudioFrame(data)
   },
 
   async finalize() {
@@ -101,6 +110,4 @@ const methods: MuxerWorkerMethods = {
     muxer?.reset()
     muxer = null
   },
-}
-
-expose(methods)
+})

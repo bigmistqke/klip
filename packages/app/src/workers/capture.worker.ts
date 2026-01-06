@@ -28,10 +28,11 @@ interface MuxerPortMethods {
   captureEnded(frameCount: number): void
 }
 
-let currentSessionId = 0
-let videoReader: ReadableStreamDefaultReader<VideoFrame> | null = null
-let audioReader: ReadableStreamDefaultReader<AudioData> | null = null
-let muxer: ReturnType<typeof rpc<MuxerPortMethods>> | null = null
+/**********************************************************************************/
+/*                                                                                */
+/*                                      Utils                                     */
+/*                                                                                */
+/**********************************************************************************/
 
 async function copyVideoFrameToBuffer(frame: VideoFrame): Promise<{
   buffer: ArrayBuffer
@@ -108,7 +109,18 @@ function audioDataToFrameData(audioData: AudioData, firstTimestamp: number): Aud
   return { data, sampleRate, timestamp }
 }
 
-const methods: CaptureWorkerMethods = {
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Methods                                    */
+/*                                                                                */
+/**********************************************************************************/
+
+let currentSessionId = 0
+let videoReader: ReadableStreamDefaultReader<VideoFrame> | null = null
+let audioReader: ReadableStreamDefaultReader<AudioData> | null = null
+let muxer: ReturnType<typeof rpc<MuxerPortMethods>> | null = null
+
+expose<CaptureWorkerMethods>({
   setMuxerPort(port: MessagePort) {
     port.start()
     muxer = rpc<MuxerPortMethods>(port)
@@ -207,6 +219,4 @@ const methods: CaptureWorkerMethods = {
     audioReader?.cancel().catch(() => {})
     log('stop', { newSessionId: currentSessionId })
   },
-}
-
-expose(methods)
+})

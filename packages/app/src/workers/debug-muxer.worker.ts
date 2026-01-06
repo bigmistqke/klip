@@ -1,5 +1,8 @@
 import { expose } from '@bigmistqke/rpc/messenger'
+import { debug } from '@eddy/utils'
 import { BufferTarget, Output, VideoSample, VideoSampleSource, WebMOutputFormat } from 'mediabunny'
+
+const log = debug('debug-muxer', true)
 
 export interface MuxerInitConfig {
   format: VideoPixelFormat
@@ -50,6 +53,12 @@ export interface MuxerWorkerMethods {
   reset(): void
 }
 
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Methods                                    */
+/*                                                                                */
+/**********************************************************************************/
+
 // Worker state
 let output: Output | null = null
 let bufferTarget: BufferTarget | null = null
@@ -83,25 +92,46 @@ async function processQueue() {
 
       encodedCount++
     } catch (err) {
-      console.error('[debug-muxer] encode error:', err)
+      log('encode error:', err)
     }
   }
 
   isProcessing = false
 }
 
-// Methods exposed to main thread via RPC
-const methods: MuxerWorkerMethods = {
+async function init(config: MuxerInitConfig) {
+  // If not pre-initialized, do full init now
+  if (!isPreInitialized) {
+    log('initializing (not pre-initialized)...')
+    bufferTarget = new BufferTarget()
+    output = new Output({ format: new WebMOutputFormat(), target: bufferTarget })
+    videoSource = new VideoSampleSource({ codec: 'vp9', bitrate: 2_000_000 })
+    output.addVideoTrack(videoSource)
+    await output.start()
+  }
+
+  log('init complete, format:', config.format, config.codedWidth, 'x', config.codedHeight)
+}
+
+function addFrame(data: MuxerFrameData) {
+  frameQueue.push(data)
+  processQueue()
+}
+
+expose<MuxerWorkerMethods>({
+  init,
+  addFrame,
+
   setCapturePort(port: MessagePort) {
-    console.log('[debug-muxer] received capture port, exposing methods on it')
+    log('received capture port, exposing methods on it')
     // Expose a subset of methods on this port for capture worker to call via RPC
     expose(
       {
-        init: methods.init,
-        addFrame: methods.addFrame,
+        init,
+        addFrame,
         captureEnded: (frameCount: number) => {
           capturedFrameCount = frameCount
-          console.log('[debug-muxer] capture ended, frameCount:', capturedFrameCount)
+          log('capture ended, frameCount:', capturedFrameCount)
         },
       },
       { to: port },
@@ -111,7 +141,7 @@ const methods: MuxerWorkerMethods = {
   async preInit() {
     if (isPreInitialized) return
 
-    console.log('[debug-muxer] pre-initializing VP9 encoder...')
+    log('pre-initializing VP9 encoder...')
 
     bufferTarget = new BufferTarget()
     output = new Output({ format: new WebMOutputFormat(), target: bufferTarget })
@@ -120,32 +150,7 @@ const methods: MuxerWorkerMethods = {
     await output.start()
 
     isPreInitialized = true
-    console.log('[debug-muxer] pre-initialization complete')
-  },
-
-  async init(config: MuxerInitConfig) {
-    // If not pre-initialized, do full init now
-    if (!isPreInitialized) {
-      console.log('[debug-muxer] initializing (not pre-initialized)...')
-      bufferTarget = new BufferTarget()
-      output = new Output({ format: new WebMOutputFormat(), target: bufferTarget })
-      videoSource = new VideoSampleSource({ codec: 'vp9', bitrate: 2_000_000 })
-      output.addVideoTrack(videoSource)
-      await output.start()
-    }
-
-    console.log(
-      '[debug-muxer] init complete, format:',
-      config.format,
-      config.codedWidth,
-      'x',
-      config.codedHeight,
-    )
-  },
-
-  addFrame(data: MuxerFrameData) {
-    frameQueue.push(data)
-    processQueue()
+    log('pre-initialization complete')
   },
 
   async finalize() {
@@ -177,7 +182,7 @@ const methods: MuxerWorkerMethods = {
     }
 
     const frameCount = encodedCount
-    console.log('[debug-muxer] finalized:', frameCount, 'frames,', blob.size, 'bytes')
+    log('finalized:', frameCount, 'frames,', blob.size, 'bytes')
 
     return { blob, frameCount }
   },
@@ -192,7 +197,4 @@ const methods: MuxerWorkerMethods = {
     bufferTarget = null
     videoSource = null
   },
-}
-
-// Expose RPC methods to main thread
-expose(methods)
+})

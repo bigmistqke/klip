@@ -20,10 +20,31 @@ interface CompositorFrameMethods {
 /** Worker state */
 type WorkerState = 'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'seeking'
 
-/** Buffer configuration */
-const BUFFER_AHEAD_FRAMES = 10
-const BUFFER_AHEAD_SECONDS = 1.0
-const BUFFER_MAX_FRAMES = 30
+export interface PlaybackWorkerMethods {
+  /** Load a blob for playback */
+  load(buffer: ArrayBuffer): Promise<{ duration: number; videoTrack: VideoTrackInfo | null }>
+
+  /** Connect to compositor via MessagePort */
+  connectToCompositor(port: MessagePort, id: string): void
+
+  /** Start playback from time at speed */
+  play(startTime: number, playbackSpeed?: number): void
+
+  /** Pause playback */
+  pause(): void
+
+  /** Seek to time (buffers from keyframe) */
+  seek(time: number): Promise<void>
+
+  /** Get current buffer range */
+  getBufferRange(): { start: number; end: number }
+
+  /** Get current state */
+  getState(): WorkerState
+
+  /** Clean up resources */
+  destroy(): void
+}
 
 /** Raw frame data for buffering */
 interface FrameData {
@@ -37,52 +58,11 @@ interface FrameData {
   duration: number // microseconds
 }
 
-/** Worker state */
-let state: WorkerState = 'idle'
-let trackId: string = ''
-
-// Demuxer state
-let input: Input | null = null
-let videoTrack: InputVideoTrack | null = null
-let videoSink: EncodedPacketSink | null = null
-let videoConfig: VideoDecoderConfig | null = null
-let duration = 0
-
-// Decoder state
-let decoder: VideoDecoder | null = null
-let decoderReady = false
-
-// Buffer state (ring buffer of decoded frames)
-let frameBuffer: FrameData[] = []
-let bufferPosition = 0 // Where we've decoded up to (seconds)
-let isBuffering = false // Lock to prevent concurrent buffer operations
-
-// Playback timing state
-let isPlaying = false
-let startWallTime = 0 // performance.now() when play started
-let startMediaTime = 0 // media time when play started
-let speed = 1
-
-// Compositor connection
-let compositor: RPC<CompositorFrameMethods> | null = null
-let lastSentTimestamp: number | null = null
-
-// Animation frame ID
-let animationFrameId: number | null = null
-
-/** Convert packet to sample format */
-function packetToSample(packet: EncodedPacket): DemuxedSample {
-  return {
-    number: 0,
-    trackId: videoTrack?.id ?? 0,
-    pts: packet.timestamp,
-    dts: packet.timestamp,
-    duration: packet.duration,
-    isKeyframe: packet.type === 'key',
-    data: packet.data,
-    size: packet.data.byteLength,
-  }
-}
+/**********************************************************************************/
+/*                                                                                */
+/*                                      Utils                                     */
+/*                                                                                */
+/**********************************************************************************/
 
 /** Convert VideoFrame to raw FrameData, close original */
 async function frameToData(frame: VideoFrame, sample: DemuxedSample): Promise<FrameData> {
@@ -117,6 +97,72 @@ function dataToFrame(data: FrameData): VideoFrame {
   })
 }
 
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Methods                                    */
+/*                                                                                */
+/**********************************************************************************/
+
+/** Buffer configuration */
+const BUFFER_AHEAD_FRAMES = 10
+const BUFFER_AHEAD_SECONDS = 1.0
+const BUFFER_MAX_FRAMES = 30
+
+/** Worker state */
+let state: WorkerState = 'idle'
+let trackId: string = ''
+
+// Demuxer state
+let input: Input | null = null
+let videoTrack: InputVideoTrack | null = null
+let videoSink: EncodedPacketSink | null = null
+let videoConfig: VideoDecoderConfig | null = null
+let duration = 0
+
+// Decoder state
+let decoder: VideoDecoder | null = null
+let decoderReady = false
+
+// Buffer state (ring buffer of decoded frames)
+let frameBuffer: FrameData[] = []
+let bufferPosition = 0 // Where we've decoded up to (seconds)
+let isBuffering = false // Lock to prevent concurrent buffer operations
+
+// Playback timing state
+let isPlaying = false
+let startWallTime = 0 // performance.now() when play started
+let startMediaTime = 0 // media time when play started
+let speed = 1
+
+// Compositor connection
+let compositor: RPC<CompositorFrameMethods> | null = null
+let lastSentTimestamp: number | null = null
+
+// Animation frame ID
+let animationFrameId: number | null = null
+
+// Pending frame resolvers
+let pendingFrameResolvers: Array<{
+  resolve: (frame: VideoFrame) => void
+  reject: (error: Error) => void
+}> = []
+let pendingFrames: VideoFrame[] = []
+let currentError: Error | null = null
+
+/** Convert packet to sample format */
+function packetToSample(packet: EncodedPacket): DemuxedSample {
+  return {
+    number: 0,
+    trackId: videoTrack?.id ?? 0,
+    pts: packet.timestamp,
+    dts: packet.timestamp,
+    duration: packet.duration,
+    isKeyframe: packet.type === 'key',
+    data: packet.data,
+    size: packet.data.byteLength,
+  }
+}
+
 /** Find frame at or before time */
 function findFrameData(timeSeconds: number): FrameData | null {
   if (frameBuffer.length === 0) return null
@@ -135,14 +181,6 @@ function findFrameData(timeSeconds: number): FrameData | null {
   return best ?? frameBuffer[0]
 }
 
-// Pending frame resolvers
-let pendingFrameResolvers: Array<{
-  resolve: (frame: VideoFrame) => void
-  reject: (error: Error) => void
-}> = []
-let pendingFrames: VideoFrame[] = []
-let currentError: Error | null = null
-
 /** Initialize decoder */
 async function initDecoder(): Promise<void> {
   if (!videoConfig) throw new Error('No video config')
@@ -152,7 +190,8 @@ async function initDecoder(): Promise<void> {
     codedWidth: videoConfig.codedWidth,
     codedHeight: videoConfig.codedHeight,
     hasDescription: !!videoConfig.description,
-    descriptionLength: videoConfig.description instanceof ArrayBuffer ? videoConfig.description.byteLength : 'N/A',
+    descriptionLength:
+      videoConfig.description instanceof ArrayBuffer ? videoConfig.description.byteLength : 'N/A',
   })
 
   // Check if decoder supports this config
@@ -453,33 +492,7 @@ function stopStreamLoop(): void {
   }
 }
 
-export interface PlaybackWorkerMethods {
-  /** Load a blob for playback */
-  load(buffer: ArrayBuffer): Promise<{ duration: number; videoTrack: VideoTrackInfo | null }>
-
-  /** Connect to compositor via MessagePort */
-  connectToCompositor(port: MessagePort, id: string): void
-
-  /** Start playback from time at speed */
-  play(startTime: number, playbackSpeed?: number): void
-
-  /** Pause playback */
-  pause(): void
-
-  /** Seek to time (buffers from keyframe) */
-  seek(time: number): Promise<void>
-
-  /** Get current buffer range */
-  getBufferRange(): { start: number; end: number }
-
-  /** Get current state */
-  getState(): WorkerState
-
-  /** Clean up resources */
-  destroy(): void
-}
-
-const methods: PlaybackWorkerMethods = {
+expose<PlaybackWorkerMethods>({
   async load(buffer: ArrayBuffer) {
     log('load', { size: buffer.byteLength })
     state = 'loading'
@@ -656,6 +669,4 @@ const methods: PlaybackWorkerMethods = {
     compositor = null
     state = 'idle'
   },
-}
-
-expose(methods)
+})

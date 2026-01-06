@@ -1,4 +1,5 @@
-import { expose, transfer } from '@bigmistqke/rpc/messenger'
+import { expose } from '@bigmistqke/rpc/messenger'
+import { debug } from '@eddy/utils'
 import {
   AudioSample,
   AudioSampleSource,
@@ -8,6 +9,8 @@ import {
   VideoSampleSource,
   WebMOutputFormat,
 } from 'mediabunny'
+
+const log = debug('recording-worker', false)
 
 export interface RecordingStartConfig {
   /** Video stream from MediaStreamTrackProcessor (use transfer()) */
@@ -39,17 +42,13 @@ export interface RecordingWorkerMethods {
    * Returns encoded blob and duration.
    */
   stop(): Promise<RecordingResult>
-
-  /**
-   * Get first captured frame for preview.
-   * Available shortly after recording starts.
-   */
-  getFirstFrame(): Promise<VideoFrame | null>
 }
 
-import { debug } from '@eddy/utils'
-
-const log = debug('recording-worker', false)
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Methods                                    */
+/*                                                                                */
+/**********************************************************************************/
 
 // Worker state
 let output: Output | null = null
@@ -179,7 +178,7 @@ async function processAudioStream(stream: ReadableStream<AudioData>) {
   log('processAudioStream: ended', { totalSamples: audioSampleCount })
 }
 
-const methods: RecordingWorkerMethods = {
+expose<RecordingWorkerMethods>({
   async start(config: RecordingStartConfig) {
     const { videoStream, audioStream, width, height } = config
     log('start called', {
@@ -300,16 +299,4 @@ const methods: RecordingWorkerMethods = {
 
     return { blob, duration }
   },
-
-  async getFirstFrame() {
-    log('getFirstFrame called', { hasFirstFrame: !!firstFrame })
-    // Return the first frame wrapped for transfer
-    // Cast needed because transfer() wrapper is transparent to the receiver
-    if (firstFrame) {
-      return transfer(firstFrame) as unknown as VideoFrame
-    }
-    return null
-  },
-}
-
-expose(methods)
+})

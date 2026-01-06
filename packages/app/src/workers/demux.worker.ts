@@ -33,12 +33,11 @@ export interface DemuxWorkerMethods {
   destroy(): void
 }
 
-// Worker state
-let input: Input | null = null
-let videoTracks: InputVideoTrack[] = []
-let audioTracks: InputAudioTrack[] = []
-let videoTrackMap = new Map<number, { track: InputVideoTrack; sink: EncodedPacketSink }>()
-let audioTrackMap = new Map<number, { track: InputAudioTrack; sink: EncodedPacketSink }>()
+/**********************************************************************************/
+/*                                                                                */
+/*                                      Utils                                     */
+/*                                                                                */
+/**********************************************************************************/
 
 function packetToSample(
   packet: EncodedPacket,
@@ -88,11 +87,24 @@ async function parseAudioTrack(track: InputAudioTrack, index: number): Promise<A
   }
 }
 
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Methods                                    */
+/*                                                                                */
+/**********************************************************************************/
+
+// Worker state
+let input: Input | null = null
+let videoTracks: InputVideoTrack[] = []
+let audioTracks: InputAudioTrack[] = []
+let videoTrackMap = new Map<number, { track: InputVideoTrack; sink: EncodedPacketSink }>()
+let audioTrackMap = new Map<number, { track: InputAudioTrack; sink: EncodedPacketSink }>()
+
 function getTrackData(trackId: number) {
   return videoTrackMap.get(trackId) ?? audioTrackMap.get(trackId) ?? null
 }
 
-const methods: DemuxWorkerMethods = {
+expose<DemuxWorkerMethods>({
   async init(buffer: ArrayBuffer): Promise<DemuxerInfo> {
     // Clean up previous instance
     if (input) {
@@ -248,6 +260,4 @@ const methods: DemuxWorkerMethods = {
     videoTrackMap.clear()
     audioTrackMap.clear()
   },
-}
-
-expose(methods)
+})

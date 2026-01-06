@@ -1,8 +1,8 @@
 import { expose, transfer, type Transferred } from '@bigmistqke/rpc/messenger'
 import { compile, glsl, uniform } from '@bigmistqke/view.gl/tag'
 import { debug } from '@eddy/utils'
-import type { LayoutTimeline, Viewport } from '~/lib/layout-types'
 import { getActiveSegments } from '~/lib/layout-resolver'
+import type { LayoutTimeline, Viewport } from '~/lib/layout-types'
 
 export interface CompositorWorkerMethods {
   /** Initialize with OffscreenCanvas */
@@ -66,32 +66,11 @@ interface CompositorView {
   }
 }
 
-// Worker state - main canvas (visible)
-let canvas: OffscreenCanvas | null = null
-let gl: WebGL2RenderingContext | WebGLRenderingContext | null = null
-let view: CompositorView | null = null
-let program: WebGLProgram | null = null
-
-// Capture canvas state (for pre-rendering, not visible)
-let captureCanvas: OffscreenCanvas | null = null
-let captureGl: WebGL2RenderingContext | WebGLRenderingContext | null = null
-let captureView: CompositorView | null = null
-let captureProgram: WebGLProgram | null = null
-
-// Current layout timeline
-let timeline: LayoutTimeline | null = null
-
-// Frame sources - keyed by trackId
-const previewFrames = new Map<string, VideoFrame>()
-const playbackFrames = new Map<string, VideoFrame>()
-const previewReaders = new Map<string, ReadableStreamDefaultReader<VideoFrame>>()
-
-// Playback worker connections - keyed by trackId
-const playbackWorkerPorts = new Map<string, MessagePort>()
-
-// Dynamic texture pool - keyed by trackId
-const textures = new Map<string, WebGLTexture>()
-const captureTextures = new Map<string, WebGLTexture>()
+/**********************************************************************************/
+/*                                                                                */
+/*                                      Utils                                     */
+/*                                                                                */
+/**********************************************************************************/
 
 function createVideoTexture(glCtx: WebGL2RenderingContext | WebGLRenderingContext): WebGLTexture {
   const texture = glCtx.createTexture()
@@ -130,6 +109,53 @@ function viewportToWebGL(viewport: Viewport, canvasHeight: number): Viewport {
   }
 }
 
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Methods                                    */
+/*                                                                                */
+/**********************************************************************************/
+
+// Worker state - main canvas (visible)
+let canvas: OffscreenCanvas | null = null
+let gl: WebGL2RenderingContext | WebGLRenderingContext | null = null
+let view: CompositorView | null = null
+let program: WebGLProgram | null = null
+
+// Capture canvas state (for pre-rendering, not visible)
+let captureCanvas: OffscreenCanvas | null = null
+let captureGl: WebGL2RenderingContext | WebGLRenderingContext | null = null
+let captureView: CompositorView | null = null
+let captureProgram: WebGLProgram | null = null
+
+// Current layout timeline
+let timeline: LayoutTimeline | null = null
+
+// Frame sources - keyed by trackId
+const previewFrames = new Map<string, VideoFrame>()
+const playbackFrames = new Map<string, VideoFrame>()
+const previewReaders = new Map<string, ReadableStreamDefaultReader<VideoFrame>>()
+
+// Playback worker connections - keyed by trackId
+const playbackWorkerPorts = new Map<string, MessagePort>()
+
+// Dynamic texture pool - keyed by trackId
+const textures = new Map<string, WebGLTexture>()
+const captureTextures = new Map<string, WebGLTexture>()
+
+function setFrame(trackId: string, frame: VideoFrame | null) {
+  // Close previous playback frame
+  const prevFrame = playbackFrames.get(trackId)
+  if (prevFrame) {
+    prevFrame.close()
+  }
+
+  if (frame) {
+    playbackFrames.set(trackId, frame)
+  } else {
+    playbackFrames.delete(trackId)
+  }
+}
+
 async function readPreviewStream(trackId: string, stream: ReadableStream<VideoFrame>) {
   log('readPreviewStream: starting', { trackId })
   const reader = stream.getReader()
@@ -158,7 +184,9 @@ async function readPreviewStream(trackId: string, stream: ReadableStream<VideoFr
   log('readPreviewStream: ended', { trackId })
 }
 
-const methods: CompositorWorkerMethods = {
+expose<CompositorWorkerMethods>({
+  setFrame,
+
   async init(offscreenCanvas: OffscreenCanvas, width: number, height: number) {
     log('init', { width, height })
 
@@ -224,20 +252,6 @@ const methods: CompositorWorkerMethods = {
     }
   },
 
-  setFrame(trackId: string, frame: VideoFrame | null) {
-    // Close previous playback frame
-    const prevFrame = playbackFrames.get(trackId)
-    if (prevFrame) {
-      prevFrame.close()
-    }
-
-    if (frame) {
-      playbackFrames.set(trackId, frame)
-    } else {
-      playbackFrames.delete(trackId)
-    }
-  },
-
   connectPlaybackWorker(trackId: string, port: MessagePort) {
     log('connectPlaybackWorker', { trackId })
 
@@ -253,9 +267,7 @@ const methods: CompositorWorkerMethods = {
     // Expose setFrame method on this port for playback worker to call
     expose(
       {
-        setFrame: (receivedTrackId: string, frame: Transferred<VideoFrame> | null) => {
-          methods.setFrame(receivedTrackId, frame)
-        },
+        setFrame,
       },
       { to: port },
     )
@@ -459,6 +471,4 @@ const methods: CompositorWorkerMethods = {
     captureProgram = null
     timeline = null
   },
-}
-
-expose(methods)
+})
