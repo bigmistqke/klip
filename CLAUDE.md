@@ -1,138 +1,174 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
 Eddy is a mobile-first video editor with musical DAW capabilities, built on AT Protocol for decentralized creative collaboration. The core concept treats every project as a **remixable stem collection** that others can fork and build upon.
 
-## Architecture
-
-### Effect-Based Data Model
-
-Everything is an effect. Audio processing, video transforms, and layout are all modeled as composable effects in pipelines:
+## Monorepo Structure
 
 ```
-project
-├── curves[]                  # Reusable animation curves (keyframe, envelope, lfo)
-├── groups[]                  # Layout containers (absolute, grid, or custom)
-│   ├── members[]             # Track/group references with layout hints
-│   └── pipeline[]            # Visual effects on composited group
-├── tracks[]                  # Media tracks
-│   ├── stem                  # Reference to app.eddy.stem record
-│   ├── clips[]               # Timeline regions with audio/video pipelines
-│   ├── audioPipeline[]       # Track-level audio effects
-│   └── videoPipeline[]       # Track-level video effects
-├── masterAudioPipeline[]     # Master audio bus
-└── masterVideoPipeline[]     # Master video output
+packages/
+├── app/          # SolidJS web application
+├── codecs/       # Demuxer, muxer, audio/video decoders (mediabunny, WebCodecs)
+├── compositor/   # WebGL video compositing (@bigmistqke/view.gl)
+├── lexicons/     # AT Protocol lexicons (app.eddy.project, app.eddy.stem)
+├── mixer/        # Web Audio API mixer (gain, pan, routing)
+├── playback/     # Video playback (frame buffer, audio scheduler)
+└── utils/        # Shared utilities (debug logging, perf monitoring)
 ```
 
-### AT Protocol Lexicons
-
-Located in `lexicons/`:
-
-- `app.eddy.project` - Project with groups, tracks, effect pipelines, and remix attribution
-- `app.eddy.stem` - Reusable media files (audio/video) stored as blobs on user's PDS
-
-Stems are separate records referenced by `strongRef`. Same stem can appear in multiple projects. Remixing clones the project record but keeps stem references.
-
-### Value System
-
-All animatable parameters use typed value unions:
-
-- `#value` - Numeric (gain, opacity, position). Static: `{ "value": 0.8 }`, animated: `{ "curve": "fade", "min": 0, "max": 1 }`
-- `#booleanValue` - Toggles (enabled, muted, solo)
-- `#integerValue` - Discrete (zIndex)
-
-Curve references point to entries in `project.curves` by `id`. Runtime validators must check curve IDs are unique and all references resolve.
-
-### Group Types
-
-Groups are typed unions based on layout strategy:
-
-- `group.absolute` - Free positioning with x/y/width/height
-- `group.grid` - CSS Grid-like cells with column/row placement
-- `group.custom` - Third-party layouts with custom hints
-
-Each group type has a matching member type (`member.absolute`, `member.grid`, `member.custom`).
-
-## Planned Tech Stack (MVP)
+## Tech Stack
 
 - **SolidJS** - UI framework
 - **@atproto/api** - OAuth login, blob upload, record CRUD
-- **@bigmistqke/view.gl** - WebGL video compositing, GPU-accelerated layout rendering
-- **@bigmistqke/worker-proxy** - Type-safe RPC for decode/encode workers
-- **Web Audio API** - Playback, recording, mixing
-- **mp4box.js** - Parse/mux MP4, extract tracks
-- **WebCodecs** - Frame-level video encode/decode (ffmpeg.wasm fallback)
+- **@bigmistqke/rpc** - Type-safe RPC for worker communication
+- **@bigmistqke/view.gl** - WebGL video compositing
+- **@bigmistqke/solid-whenever** - Reactive guards (`whenEffect`, `whenMemo`)
+- **mediabunny** - WebM muxing (VP9 + Opus)
+- **WebCodecs API** - Frame-level video/audio encode/decode
 
-## MVP Constraints
+## Key Patterns
 
-4-track recorder (think Tascam Portastudio, not Pro Tools):
+### Generator-based Actions
 
-- 4 tracks max, 1 clip per track starting at t=0
-- Layout: grid preset only
-- Audio effects: gain + pan only
-- No video effects, transitions, MIDI, or automation
+Use `action()` with generators for async operations with automatic cancellation:
 
-## CSS Guidelines
+```ts
+import { action, defer, hold } from '~/hooks/action'
 
-- **Use CSS Grid for all layouts** - Prefer `display: grid` over flexbox for layout purposes
+const recordAction = action(function* (trackIndex: number, { onCleanup }) {
+  const stream = yield* defer(navigator.mediaDevices.getUserMedia({ video: true }))
+  onCleanup(() => stream.getTracks().forEach(t => t.stop()))
+
+  // Hold until cancelled, then return value
+  return hold(() => ({ trackIndex, duration: performance.now() }))
+})
+
+// Usage
+recordAction(0)           // Start
+recordAction.cancel()     // Cancel and trigger cleanup
+const result = await recordAction.promise()  // Get result after cancel
+```
+
+### Worker Communication
+
+Use `@bigmistqke/rpc` for type-safe worker RPC:
+
+```ts
+import { rpc, transfer, expose } from '@bigmistqke/rpc/messenger'
+import type { WorkerMethods } from './worker'
+
+// Main thread
+const worker = rpc<WorkerMethods>(new Worker('./worker.ts'))
+await worker.init(transfer(offscreenCanvas))
+
+// Worker
+expose({ init(canvas) { ... } })
+```
+
+### Resource Primitives
+
+Custom reactive resources with cleanup:
+
+```ts
+import { resource } from '~/hooks/resource'
+import { deepResource } from '~/hooks/deep-resource'
+
+// resource() - like createResource but with onCleanup
+const [player] = resource(canvas, async (canvas, { onCleanup }) => {
+  const p = await createPlayer(canvas)
+  onCleanup(() => p.destroy())
+  return p
+})
+
+// deepResource() - deep reactive updates to store
+const [project, { mutate }] = deepResource(source, fetcher)
+```
 
 ## SolidJS Conventions
 
-- **Signal access** - When reading signal values, always assign to a local const with underscore prefix:
-  ```ts
-  // Good
-  const _player = player()
-  if (!_player) return
-  _player.play()
+### Signal Access
 
-  // Bad - calling signal multiple times
-  if (!player()) return
-  player().play()
-  ```
+Always assign signal values to local const with underscore prefix:
 
-- **No single-character variables** - Always use descriptive names:
-  ```ts
-  // Good
-  for (const playback of playbacks) { ... }
-  const _player = player()
-  const link = document.createElement('a')
+```ts
+// Good
+const _player = player()
+if (!_player) return
+_player.play()
 
-  // Bad
-  for (const p of playbacks) { ... }
-  const p = player()
-  const a = document.createElement('a')
-  ```
+// Bad - calling signal multiple times
+if (!player()) return
+player().play()
+```
 
-- **solid-whenever** - Use `@bigmistqke/solid-whenever` for reactive guards:
-  ```ts
-  import { whenEffect, whenMemo } from '@bigmistqke/solid-whenever'
+### Reactive Guards
 
-  // Good - effect only runs when player is truthy
-  whenEffect(player, player => {
-    player.play()
-  })
+Use `@bigmistqke/solid-whenever` for null-safe reactive access:
 
-  // Good - memo with fallback when player is null
-  const hasClip = whenMemo(
-    player,
-    player => player.hasClip(0),
-    () => false
-  )
+```ts
+import { whenEffect, whenMemo } from '@bigmistqke/solid-whenever'
 
-  // Bad - manual null check in effect
-  createEffect(() => {
-    const player = player()
-    if (!player) return
-    player.play()
-  })
-  ```
+whenEffect(player, player => player.play())
+
+const hasClip = whenMemo(player, p => p.hasClip(0), () => false)
+```
+
+### Naming
+
+No single-character variables. Use descriptive names:
+
+```ts
+// Good
+for (const playback of playbacks) { ... }
+const link = document.createElement('a')
+
+// Bad
+for (const p of playbacks) { ... }
+const a = document.createElement('a')
+```
+
+## Architecture Notes
+
+### Audio Routing During Recording
+
+Chrome has a bug where `AudioContext.destination` interferes with `getUserMedia` capture, causing thin audio with phasing artifacts. During recording, audio is routed through `MediaStreamAudioDestinationNode` → `HTMLAudioElement` to bypass this:
+
+```ts
+mixer.useMediaStreamOutput()   // During recording
+mixer.useDirectOutput()        // Normal playback
+```
+
+See: https://groups.google.com/a/chromium.org/g/chromium-discuss/c/6s2EnqdBERE
+
+### Worker Architecture
+
+Heavy operations run in workers:
+- **compositor.worker** - WebGL rendering on OffscreenCanvas
+- **demux.worker** - Video demuxing + decoding
+- **muxer.worker** - VP9/Opus encoding to WebM
+- **capture.worker** - Camera capture to raw frames
+
+Workers communicate via `MessageChannel` ports for direct worker-to-worker RPC.
+
+## MVP Constraints
+
+Current implementation is a 4-track recorder (think Tascam Portastudio):
+
+- 4 tracks max, 1 clip per track starting at t=0
+- Layout: 2x2 grid only
+- Audio effects: gain + pan only
+- No video effects, transitions, or automation
+
+## CSS Guidelines
+
+Prefer `display: grid` over flexbox for layouts.
 
 ## Workflow
 
-- **Tickets** - A ticket is a single task. After completing a ticket, ask the user to confirm before proceeding
-- **Before committing** - Write a list of things for the user to test and wait for confirmation before creating the commit
-- **Ask before committing** - Always ask the user for permission before running `git commit`
-- **Commit messages** - No Claude signature in commit messages
+- **Tickets** - A ticket is a single task. After completing, ask user to confirm before proceeding
+- **Before committing** - List things for user to test, wait for confirmation
+- **Ask before committing** - Always ask permission before `git commit`
+- **Commit messages** - No Claude signature
