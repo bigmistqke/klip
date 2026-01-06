@@ -11,7 +11,8 @@
     "test:run": "pnpm -r test:run",
     "test:browser": "pnpm --filter @eddy/codecs test:browser",
     "test:browser:run": "pnpm --filter @eddy/codecs test:browser:run",
-    "perf": "npx tsx scripts/perf-test.ts"
+    "perf": "npx tsx scripts/perf-test.ts",
+    "types": "pnpm -r types"
   },
   "devDependencies": {
     "@types/audioworklet": "^0.0.92",

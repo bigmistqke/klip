@@ -1,13 +1,6 @@
 {
+  "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "declaration": true,
-    "declarationMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "lib": ["ESNext", "DOM", "DOM.Iterable"]

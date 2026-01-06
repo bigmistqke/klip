@@ -172,3 +172,4 @@ Prefer `display: grid` over flexbox for layouts.
 - **Before committing** - List things for user to test, wait for confirmation
 - **Ask before committing** - Always ask permission before `git commit`
 - **Commit messages** - No Claude signature
+- **TypeScript checks** - Run `pnpm types` to check compilation. Only run once when creating new files, don't repeatedly check.
