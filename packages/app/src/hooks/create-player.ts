@@ -455,6 +455,10 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
       track.duration = duration
       track.state = 'ready'
 
+      // Seek to current time (or 0) to show initial frame
+      const currentTime = clock.time()
+      await track.rpc.seek(currentTime)
+
       // Trigger duration recalc
       setTrackVersion(v => v + 1)
 
