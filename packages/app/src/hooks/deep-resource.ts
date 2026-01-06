@@ -5,7 +5,7 @@
  * reactivity. The store can be locally mutated while still receiving updates from refetches.
  */
 
-import { type Resource, type ResourceSource } from 'solid-js'
+import { type ResourceSource } from 'solid-js'
 import { createStore, reconcile, type SetStoreFunction, type Store } from 'solid-js/store'
 import { resource, type ManagedResourceReturn, type ResourceFetcher } from './resource'
 

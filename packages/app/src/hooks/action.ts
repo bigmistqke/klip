@@ -300,7 +300,6 @@ export function action<T = undefined, R = void>(fetcher: ActionFetcher<T, R>): A
         throw err
       } finally {
         setPending(false)
-        currentPromise = null
       }
     })()
 

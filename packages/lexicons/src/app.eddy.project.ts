@@ -55,6 +55,12 @@ export default {
             description:
               'Groups containing tracks. Without layout, members stack. With grid layout, members fill cells.',
           },
+          rootGroup: {
+            type: 'string',
+            description:
+              'ID of the group that serves as the timeline root. If not set, defaults to first group.',
+            maxLength: 64,
+          },
           tracks: {
             type: 'array',
             items: { type: 'ref', ref: '#track' },
@@ -483,19 +489,47 @@ export default {
       },
     },
 
+    'clipSource.stem': {
+      type: 'object',
+      description: 'Reference to an external stem record',
+      required: ['type', 'ref'],
+      properties: {
+        type: { type: 'string', const: 'stem' },
+        ref: {
+          type: 'ref',
+          ref: 'com.atproto.repo.strongRef',
+          description: 'Reference to app.eddy.stem record',
+        },
+      },
+    },
+
+    'clipSource.group': {
+      type: 'object',
+      description: 'Reference to a group within this project (for nested compositions)',
+      required: ['type', 'id'],
+      properties: {
+        type: { type: 'string', const: 'group' },
+        id: {
+          type: 'string',
+          description: 'ID of the group to use as source',
+          maxLength: 64,
+        },
+      },
+    },
+
     clip: {
       type: 'object',
-      description: 'A region on the timeline referencing part of a stem',
+      description: 'A region on the timeline referencing part of a stem or group',
       required: ['id', 'offset', 'duration'],
       properties: {
         id: {
           type: 'string',
           maxLength: 64,
         },
-        stem: {
-          type: 'ref',
-          ref: 'com.atproto.repo.strongRef',
-          description: 'Reference to app.eddy.stem record',
+        source: {
+          type: 'union',
+          refs: ['#clipSource.stem', '#clipSource.group'],
+          description: 'Source media: a stem reference or a nested group',
         },
         offset: {
           type: 'integer',

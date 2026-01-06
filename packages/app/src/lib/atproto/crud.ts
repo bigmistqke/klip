@@ -1,5 +1,8 @@
 import type { Agent } from '@atproto/api'
 import {
+  type Clip,
+  type ClipSource,
+  type ClipSourceStem,
   type Project,
   projectValidators,
   projectWireValidators,
@@ -12,6 +15,11 @@ import { debug } from '@eddy/utils'
 import * as v from 'valibot'
 
 const log = debug('crud', false)
+
+/** Check if a clip source is a stem reference */
+function isStemSource(source: ClipSource | undefined): source is ClipSourceStem {
+  return source?.type === 'stem'
+}
 
 export interface RecordRef {
   uri: string
@@ -217,22 +225,22 @@ export async function publishProject(
         return
       }
 
-      // Case 2: Existing stem
-      if (clip.stem) {
-        const { repo } = parseAtUri(clip.stem.uri)
+      // Case 2: Existing stem source
+      if (isStemSource(clip.source)) {
+        const { repo } = parseAtUri(clip.source.ref.uri)
         if (repo === myDid) {
           // Own stem - keep as is
-          stemRefs.set(clip.id, clip.stem)
+          stemRefs.set(clip.id, clip.source.ref)
         } else {
           // External stem - clone to own PDS
-          const cloned = await cloneStem(agent, clip.stem.uri)
+          const cloned = await cloneStem(agent, clip.source.ref.uri)
           stemRefs.set(clip.id, cloned)
         }
       }
     }),
   )
 
-  // Build tracks - only include clips with stems
+  // Build tracks - only include clips with stem sources
   const tracks = project.tracks
     .map(track => ({
       id: track.id,
@@ -240,7 +248,7 @@ export async function publishProject(
         .filter(clip => stemRefs.has(clip.id))
         .map(clip => ({
           id: clip.id,
-          stem: stemRefs.get(clip.id),
+          source: { type: 'stem' as const, ref: stemRefs.get(clip.id)! },
           offset: clip.offset,
           duration: clip.duration,
         })),
@@ -320,8 +328,8 @@ export async function deleteOrphanedStems(agent: Agent): Promise<string[]> {
       const project = await getProject(agent, projectItem.uri)
       for (const track of project.value.tracks) {
         for (const clip of track.clips) {
-          if (clip.stem) {
-            referencedStems.add(clip.stem.uri)
+          if (isStemSource(clip.source)) {
+            referencedStems.add(clip.source.ref.uri)
           }
         }
       }

@@ -1,7 +1,7 @@
 import type { Agent } from '@atproto/api'
 import { $MESSENGER, rpc, transfer } from '@bigmistqke/rpc/messenger'
 import { every, whenEffect, whenMemo } from '@bigmistqke/solid-whenever'
-import type { AudioEffect, Project, Track } from '@eddy/lexicons'
+import type { AudioEffect, ClipSource, ClipSourceStem, Project, Track } from '@eddy/lexicons'
 import { getMasterMixer, resumeAudioContext } from '@eddy/mixer'
 import { debug } from '@eddy/utils'
 import { createEffect, createSelector, createSignal, mapArray, type Accessor } from 'solid-js'
@@ -20,6 +20,11 @@ import MuxerWorker from '~/workers/muxer.worker?worker'
 import { createPlayer } from './create-player'
 
 const log = debug('editor', false)
+
+/** Check if a clip source is a stem reference */
+function isStemSource(source: ClipSource | undefined): source is ClipSourceStem {
+  return source?.type === 'stem'
+}
 
 // Local state extensions (not persisted to PDS)
 interface LocalClipState {
@@ -165,12 +170,12 @@ export function createEditor(options: CreateEditorOptions) {
 
   // Resource map for stem blobs - fine-grained reactivity per clipId
   const stemBlobs = createResourceMap(
-    // Derive clips that have stems from project store
+    // Derive clips that have stem sources from project store
     () =>
       project()
         .tracks.flatMap(track => track.clips)
         .filter(
-          (clip): clip is typeof clip & { stem: NonNullable<typeof clip.stem> } => !!clip.stem,
+          (clip): clip is typeof clip & { source: ClipSourceStem } => isStemSource(clip.source),
         )
         .map(clip => [clip.id, clip] as const),
     async (clipId, clip) => {
@@ -178,7 +183,7 @@ export function createEditor(options: CreateEditorOptions) {
       if (!agent) return null
 
       try {
-        return await getStemBlob(agent, clip.stem.uri)
+        return await getStemBlob(agent, clip.source.ref.uri)
       } catch (err) {
         console.error(`Failed to fetch stem for clip ${clipId}:`, err)
         return null

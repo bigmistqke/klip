@@ -27,6 +27,7 @@ export function assertedNotNullish<T>(value: T, error: string): NonNullable<T> {
   if (assertNotNullish(value)) {
     return value
   } else {
+    console.error(value)
     throw new Error(error)
   }
 }
