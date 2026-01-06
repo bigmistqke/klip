@@ -163,12 +163,21 @@ export function createMuxer(options: MuxerOptions = {}): Muxer {
         const numberOfChannels = data.length
         const numberOfFrames = data[0].length
 
-        // Interleave channels
-        const interleaved = new Float32Array(numberOfChannels * numberOfFrames)
-        for (let frame = 0; frame < numberOfFrames; frame++) {
-          for (let channel = 0; channel < numberOfChannels; channel++) {
-            interleaved[frame * numberOfChannels + channel] = data[channel][frame]
-          }
+        // Log first audio frame for debugging
+        if (audioFrameCount === 0) {
+          log('first audio frame to encode', {
+            sampleRate,
+            numberOfChannels,
+            numberOfFrames,
+            timestamp,
+            dataLength: data.map(ch => ch.length),
+          })
+        }
+
+        // Concatenate channels (planar format: all ch0 samples, then all ch1 samples, etc.)
+        const planar = new Float32Array(numberOfChannels * numberOfFrames)
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+          planar.set(data[channel], channel * numberOfFrames)
         }
 
         const audioData = new AudioData({
@@ -177,7 +186,7 @@ export function createMuxer(options: MuxerOptions = {}): Muxer {
           numberOfFrames,
           numberOfChannels,
           timestamp: timestamp * 1_000_000,
-          data: interleaved,
+          data: planar,
         })
 
         const sample = new AudioSample(audioData)

@@ -12,6 +12,7 @@ import { resource } from '~/hooks/resource'
 import { getProjectByRkey, getStemBlob, publishProject } from '~/lib/atproto/crud'
 import { createDebugInfo as initDebugInfo } from '~/lib/create-debug-info'
 import { createResourceMap } from '~/lib/create-resource-map'
+import { assertedNotNullish } from '~/utils'
 import type { CaptureWorkerMethods } from '~/workers/capture.worker'
 import CaptureWorker from '~/workers/capture.worker?worker'
 import type { MuxerWorkerMethods } from '~/workers/muxer.worker'
@@ -275,7 +276,11 @@ export function createEditor(options: CreateEditorOptions) {
   const previewAction = action(async (trackIndex: number, { onCleanup }) => {
     await resumeAudioContext()
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
       video: { facingMode: 'user' },
     })
     player()?.setPreviewSource(trackIndex, stream)
@@ -292,23 +297,19 @@ export function createEditor(options: CreateEditorOptions) {
   const recordAction = action(function* (trackIndex: number, { onCleanup }) {
     log('record', { trackIndex })
 
-    const _workers = workers()
-    if (!_workers) throw new Error('Workers not ready')
-
-    const _player = player()
-    if (!_player) throw new Error('No player available')
-
-    const stream = previewAction.result()
-    if (!stream) throw new Error('Cannot start recording without media stream')
+    const _workers = assertedNotNullish(workers(), 'Workers not ready')
+    const _player = assertedNotNullish(player(), 'No player available')
+    const stream = assertedNotNullish(
+      previewAction.latest(),
+      'Cannot start recording without media stream',
+    )
 
     // Get video track and create processor
-    const videoTrack = stream.getVideoTracks()[0]
-    if (!videoTrack) throw new Error('No video track')
-
+    const videoTrack = assertedNotNullish(stream.getVideoTracks()[0], 'No video track')
     const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack })
 
     // Get audio track and create processor (if available)
-    const audioTrack = stream.getAudioTracks()[0]
+    const [audioTrack] = stream.getAudioTracks()
     const audioProcessor = audioTrack ? new MediaStreamTrackProcessor({ track: audioTrack }) : null
 
     // Start capture (runs until cancelled)
@@ -322,11 +323,16 @@ export function createEditor(options: CreateEditorOptions) {
 
     onCleanup(async () => {
       log('stopping capture...')
-      await _workers.capture.stop()
       await capturePromise
+      await _workers.capture.stop()
     })
 
-    // Start playback of other tracks
+    // Route playback audio through MediaStream output during recording.
+    // Avoids Chrome bug where AudioContext.destination interferes with getUserMedia capture.
+    const mixer = getMasterMixer()
+    mixer.useMediaStreamOutput()
+    onCleanup(() => mixer.useDirectOutput())
+
     yield* defer(_player.play(0))
 
     log('recording started')
