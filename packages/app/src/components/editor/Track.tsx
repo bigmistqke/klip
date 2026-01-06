@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { FiDownload, FiTrash2 } from 'solid-icons/fi'
-import { type Component, Show } from 'solid-js'
+import type { Component } from 'solid-js'
 import styles from './Track.module.css'
 
 interface TrackProps {
@@ -48,38 +48,39 @@ export const Track: Component<TrackProps> = props => {
         <span class={styles.status}>{getStatus()}</span>
       </div>
 
-      <div class={styles.sliders}>
-        <label class={styles.slider}>
-          <span>Vol</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={props.volume}
-            onInput={e => props.onVolumeChange(parseFloat(e.target.value))}
-            onClick={e => e.stopPropagation()}
-          />
-        </label>
-        <label class={styles.slider}>
-          <span>Pan</span>
-          <input
-            type="range"
-            min={-1}
-            max={1}
-            step={0.01}
-            value={props.pan}
-            onInput={e => props.onPanChange(parseFloat(e.target.value))}
-            onClick={e => e.stopPropagation()}
-          />
-        </label>
-      </div>
+      <div class={styles.body}>
+        <div class={styles.sliders}>
+          <label class={styles.slider}>
+            <span>Vol</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={props.volume}
+              onInput={e => props.onVolumeChange(parseFloat(e.target.value))}
+              onClick={e => e.stopPropagation()}
+            />
+          </label>
+          <label class={styles.slider}>
+            <span>Pan</span>
+            <input
+              type="range"
+              min={-1}
+              max={1}
+              step={0.01}
+              value={props.pan}
+              onInput={e => props.onPanChange(parseFloat(e.target.value))}
+              onClick={e => e.stopPropagation()}
+            />
+          </label>
+        </div>
 
-      <Show when={props.hasClip}>
         <div class={styles.controls}>
           <button
             type="button"
             class={styles.downloadButton}
+            classList={{ [styles.hidden]: !props.hasClip }}
             onClick={e => {
               e.stopPropagation()
               props.onDownload()
@@ -91,6 +92,7 @@ export const Track: Component<TrackProps> = props => {
           <button
             type="button"
             class={styles.clearButton}
+            classList={{ [styles.hidden]: !props.hasClip }}
             onClick={e => {
               e.stopPropagation()
               props.onClear()
@@ -100,7 +102,7 @@ export const Track: Component<TrackProps> = props => {
             <FiTrash2 size={14} />
           </button>
         </div>
-      </Show>
+      </div>
     </div>
   )
 }

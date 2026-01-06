@@ -1,6 +1,6 @@
 .track {
   display: grid;
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto;
   gap: 8px;
   padding: 12px;
   background: #1a1a1a;
@@ -10,6 +10,13 @@
   transition:
     border-color 0.2s,
     background 0.2s;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
 }
 
 .track:hover {
@@ -84,17 +91,20 @@
 
 .controls {
   display: grid;
-  grid-template-columns: auto auto;
-  justify-content: center;
-  gap: 8px;
+  grid-template-rows: auto auto;
+  gap: 4px;
+}
+
+.hidden {
+  visibility: hidden;
 }
 
 .clearButton,
 .downloadButton {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   background: #333;
   color: white;
   border: none;
