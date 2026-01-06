@@ -14,7 +14,7 @@ interface DeepResourceActions<T, S> extends Omit<ManagedResourceReturn<T, S>[1],
 }
 
 /** Store accessor with loading state from the underlying resource */
-interface StoreAccessor<T> {
+export interface StoreAccessor<T> {
   (): T
   loading: boolean
   error: unknown

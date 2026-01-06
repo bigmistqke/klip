@@ -9,7 +9,7 @@
 import { rpc } from '@bigmistqke/rpc/messenger'
 import { debug } from '@eddy/utils'
 import { createAudioRingBuffer } from './audio-ring-buffer'
-import { RingBufferProcessorMethods } from './audio-ring-buffer-processor'
+import type { RingBufferProcessorMethods } from './audio-ring-buffer-processor'
 import workletURL from './audio-ring-buffer-processor?worker&url'
 
 const log = debug('audio-scheduler', false)

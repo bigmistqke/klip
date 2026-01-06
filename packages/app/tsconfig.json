@@ -4,7 +4,7 @@
     "allowSyntheticDefaultImports": true,
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
-    "types": ["vite/client", "node"],
+    "types": ["vite/client", "node", "@types/audioworklet"],
     "noEmit": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
