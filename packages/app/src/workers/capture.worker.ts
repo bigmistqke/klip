@@ -121,13 +121,13 @@ let audioReader: ReadableStreamDefaultReader<AudioData> | null = null
 let muxer: ReturnType<typeof rpc<MuxerPortMethods>> | null = null
 
 expose<CaptureWorkerMethods>({
-  setMuxerPort(port: MessagePort) {
+  setMuxerPort(port) {
     port.start()
     muxer = rpc<MuxerPortMethods>(port)
     log('received muxer port')
   },
 
-  async start(videoStream: ReadableStream<VideoFrame>, audioStream?: ReadableStream<AudioData>) {
+  async start(videoStream, audioStream) {
     if (!muxer) {
       throw new Error('No muxer - call setMuxerPort first')
     }

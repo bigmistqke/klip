@@ -57,13 +57,13 @@ let reader: ReadableStreamDefaultReader<VideoFrame> | null = null
 let muxer: ReturnType<typeof rpc<MuxerPortMethods>> | null = null
 
 expose<CaptureWorkerMethods>({
-  setMuxerPort(port: MessagePort) {
+  setMuxerPort(port) {
     port.start()
     muxer = rpc<MuxerPortMethods>(port)
     log('received muxer port, created RPC proxy')
   },
 
-  async start(readable: ReadableStream<VideoFrame>) {
+  async start(readable) {
     if (!muxer) {
       throw new Error('No muxer - call setMuxerPort first')
     }

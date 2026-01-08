@@ -67,7 +67,7 @@ expose<MuxerWorkerMethods>({
   addVideoFrame,
   addAudioFrame,
 
-  setCapturePort(port: MessagePort) {
+  setCapturePort(port) {
     log('received capture port')
     // Expose methods on this port for capture worker to call
     expose(

@@ -105,7 +105,7 @@ function getTrackData(trackId: number) {
 }
 
 expose<DemuxWorkerMethods>({
-  async init(buffer: ArrayBuffer): Promise<DemuxerInfo> {
+  async init(buffer) {
     // Clean up previous instance
     if (input) {
       input[Symbol.dispose]?.()
@@ -158,7 +158,7 @@ expose<DemuxWorkerMethods>({
     }
   },
 
-  async getVideoConfig(): Promise<VideoDecoderConfig> {
+  async getVideoConfig() {
     if (videoTracks.length === 0) {
       throw new Error('No video track available')
     }
@@ -169,7 +169,7 @@ expose<DemuxWorkerMethods>({
     return config
   },
 
-  async getAudioConfig(): Promise<AudioDecoderConfig> {
+  async getAudioConfig() {
     if (audioTracks.length === 0) {
       throw new Error('No audio track available')
     }
@@ -180,7 +180,7 @@ expose<DemuxWorkerMethods>({
     return config
   },
 
-  async getSamples(trackId: number, startTime: number, endTime: number): Promise<DemuxedSample[]> {
+  async getSamples(trackId, startTime, endTime) {
     const trackData = getTrackData(trackId)
     if (!trackData) {
       throw new Error(`Track ${trackId} not found`)
@@ -213,7 +213,7 @@ expose<DemuxWorkerMethods>({
     return samples
   },
 
-  async getAllSamples(trackId: number): Promise<DemuxedSample[]> {
+  async getAllSamples(trackId) {
     const trackData = getTrackData(trackId)
     if (!trackData) {
       throw new Error(`Track ${trackId} not found`)
@@ -234,7 +234,7 @@ expose<DemuxWorkerMethods>({
     return samples
   },
 
-  async getKeyframeBefore(trackId: number, time: number): Promise<DemuxedSample | null> {
+  async getKeyframeBefore(trackId, time) {
     const trackData = getTrackData(trackId)
     if (!trackData) {
       throw new Error(`Track ${trackId} not found`)

@@ -134,7 +134,7 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
     connectPlaybackWorker: compositorRpc.connectPlaybackWorker,
     disconnectPlaybackWorker: compositorRpc.disconnectPlaybackWorker,
     setCaptureFrame: compositorRpc.setCaptureFrame,
-    renderCapture: compositorRpc.renderCapture,
+    renderToCaptureCanvas: compositorRpc.renderToCaptureCanvas,
     captureFrame: compositorRpc.captureFrame,
 
     setPreviewStream(trackId: string, stream: MediaStream | null) {
@@ -168,42 +168,47 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
 
   /** Get or create a track entry */
   function getOrCreateTrack(trackId: string): TrackEntry {
-    let track = tracks[trackId]
-    if (!track) {
-      log('creating track entry', { trackId })
+    const track = tracks[trackId]
 
-      // Create playback worker
-      const worker = new PlaybackWorker()
-      const playbackRpc = rpc<PlaybackWorkerMethods>(worker)
-
-      // Create audio pipeline
-      const audioPipeline = createAudioPipeline()
-
-      // Create MessageChannel for worker-to-worker communication
-      const channel = new MessageChannel()
-
-      // Send port1 to compositor (compositor listens)
-      compositorRpc.connectPlaybackWorker(trackId, transfer(channel.port1))
-
-      // Send port2 to playback worker (playback worker sends)
-      playbackRpc.connectToCompositor(transfer(channel.port2), trackId)
-
-      track = {
-        trackId,
-        worker,
-        rpc: playbackRpc,
-        audioPipeline,
-        duration: 0,
-        state: 'idle',
-      }
-      setTracks(trackId, track)
+    if (track) {
+      return track
     }
-    return track
+
+    log('creating track entry', { trackId })
+
+    // Create playback worker
+    const worker = new PlaybackWorker()
+    const playbackRpc = rpc<PlaybackWorkerMethods>(worker)
+
+    // Create audio pipeline
+    const audioPipeline = createAudioPipeline()
+
+    // Create MessageChannel for worker-to-worker communication
+    const channel = new MessageChannel()
+
+    // Send port1 to compositor (compositor listens)
+    compositorRpc.connectPlaybackWorker(trackId, transfer(channel.port1))
+
+    // Send port2 to playback worker (playback worker sends)
+    playbackRpc.connectToCompositor(transfer(channel.port2), trackId)
+
+    const newTrack: TrackEntry = {
+      trackId,
+      worker,
+      rpc: playbackRpc,
+      audioPipeline,
+      duration: 0,
+      state: 'idle',
+    }
+    setTracks(trackId, newTrack)
+
+    return newTrack
   }
 
   /** Remove a track entry */
   function removeTrack(trackId: string): void {
     const track = tracks[trackId]
+
     if (!track) return
 
     log('removing track entry', { trackId })

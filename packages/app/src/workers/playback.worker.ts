@@ -25,7 +25,7 @@ export interface PlaybackWorkerMethods {
   load(buffer: ArrayBuffer): Promise<{ duration: number; videoTrack: VideoTrackInfo | null }>
 
   /** Connect to compositor via MessagePort */
-  connectToCompositor(port: MessagePort, id: string): void
+  connectToCompositor(id: string, port: MessagePort): void
 
   /** Start playback from time at speed */
   play(startTime: number, playbackSpeed?: number): void
@@ -493,7 +493,7 @@ function stopStreamLoop(): void {
 }
 
 expose<PlaybackWorkerMethods>({
-  async load(buffer: ArrayBuffer) {
+  async load(buffer) {
     log('load', { size: buffer.byteLength })
     state = 'loading'
 
@@ -576,13 +576,13 @@ expose<PlaybackWorkerMethods>({
     return { duration, videoTrack: videoTrackInfo }
   },
 
-  connectToCompositor(port: MessagePort, id: string) {
+  connectToCompositor(id, port) {
     log('connectToCompositor', { id })
     trackId = id
     compositor = rpc<CompositorFrameMethods>(port)
   },
 
-  play(startTime: number, playbackSpeed = 1) {
+  play(startTime, playbackSpeed = 1) {
     log('play', { startTime, playbackSpeed })
 
     startMediaTime = startTime
@@ -605,7 +605,7 @@ expose<PlaybackWorkerMethods>({
     stopStreamLoop()
   },
 
-  async seek(time: number) {
+  async seek(time) {
     log('seek', { time })
     const wasPlaying = isPlaying
 

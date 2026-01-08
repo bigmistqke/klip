@@ -122,7 +122,7 @@ expose<MuxerWorkerMethods>({
   init,
   addFrame,
 
-  setCapturePort(port: MessagePort) {
+  setCapturePort(port) {
     log('received capture port, exposing methods on it')
     // Expose a subset of methods on this port for capture worker to call via RPC
     expose(

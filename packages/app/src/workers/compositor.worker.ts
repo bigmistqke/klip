@@ -2,7 +2,7 @@ import { expose, transfer, type Transferred } from '@bigmistqke/rpc/messenger'
 import { compile, glsl, uniform } from '@bigmistqke/view.gl/tag'
 import { debug } from '@eddy/utils'
 import { getActiveSegments } from '~/lib/layout-resolver'
-import type { LayoutTimeline, Viewport } from '~/lib/layout-types'
+import type { Timeline, Viewport } from '~/lib/layout-types'
 
 const log = debug('compositor-worker', false)
 
@@ -11,7 +11,7 @@ export interface CompositorWorkerMethods {
   init(canvas: OffscreenCanvas, width: number, height: number): Promise<void>
 
   /** Set the compiled layout timeline */
-  setTimeline(timeline: LayoutTimeline): void
+  setTimeline(timeline: Timeline): void
 
   /** Set a preview stream for a track (continuously reads latest frame) */
   setPreviewStream(trackId: string, stream: ReadableStream<VideoFrame> | null): void
@@ -32,7 +32,7 @@ export interface CompositorWorkerMethods {
   setCaptureFrame(trackId: string, frame: Transferred<VideoFrame> | null): void
 
   /** Render to capture canvas at time T */
-  renderCapture(time: number): void
+  renderToCaptureCanvas(time: number): void
 
   /** Capture frame from capture canvas as VideoFrame */
   captureFrame(timestamp: number): VideoFrame | null
@@ -128,7 +128,7 @@ let captureView: CompositorView | null = null
 let captureProgram: WebGLProgram | null = null
 
 // Current layout timeline
-let timeline: LayoutTimeline | null = null
+let timeline: Timeline | null = null
 
 // Frame sources - keyed by trackId
 const previewFrames = new Map<string, VideoFrame>()
@@ -187,7 +187,7 @@ async function readPreviewStream(trackId: string, stream: ReadableStream<VideoFr
 expose<CompositorWorkerMethods>({
   setFrame,
 
-  async init(offscreenCanvas: OffscreenCanvas, width: number, height: number) {
+  async init(offscreenCanvas, width, height) {
     log('init', { width, height })
 
     // Main canvas (visible)
@@ -224,12 +224,12 @@ expose<CompositorWorkerMethods>({
     log('init complete (with capture canvas)')
   },
 
-  setTimeline(newTimeline: LayoutTimeline) {
+  setTimeline(newTimeline) {
     log('setTimeline', { duration: newTimeline.duration, slotCount: newTimeline.slots.length })
     timeline = newTimeline
   },
 
-  setPreviewStream(trackId: string, stream: ReadableStream<VideoFrame> | null) {
+  setPreviewStream(trackId, stream) {
     log('setPreviewStream', { trackId, hasStream: !!stream })
 
     // Cancel existing reader
@@ -252,7 +252,7 @@ expose<CompositorWorkerMethods>({
     }
   },
 
-  connectPlaybackWorker(trackId: string, port: MessagePort) {
+  connectPlaybackWorker(trackId, port) {
     log('connectPlaybackWorker', { trackId })
 
     // Disconnect existing port for this track
@@ -273,7 +273,7 @@ expose<CompositorWorkerMethods>({
     )
   },
 
-  disconnectPlaybackWorker(trackId: string) {
+  disconnectPlaybackWorker(trackId) {
     log('disconnectPlaybackWorker', { trackId })
 
     const port = playbackWorkerPorts.get(trackId)
@@ -290,7 +290,7 @@ expose<CompositorWorkerMethods>({
     }
   },
 
-  render(time: number) {
+  render(time) {
     if (!gl || !canvas || !view || !program || !timeline) return
 
     gl.useProgram(program)
@@ -347,7 +347,7 @@ expose<CompositorWorkerMethods>({
   },
 
   // Set a frame on the capture canvas (for pre-rendering)
-  setCaptureFrame(trackId: string, frame: VideoFrame | null) {
+  setCaptureFrame(trackId, frame) {
     if (!captureGl) return
 
     const texture = getOrCreateTexture(captureGl, captureTextures, trackId)
@@ -369,7 +369,7 @@ expose<CompositorWorkerMethods>({
   },
 
   // Render to the capture canvas (for pre-rendering)
-  renderCapture(time: number) {
+  renderToCaptureCanvas(time) {
     if (!captureGl || !captureCanvas || !captureView || !captureProgram || !timeline) return
 
     captureGl.useProgram(captureProgram)
@@ -401,7 +401,7 @@ expose<CompositorWorkerMethods>({
     }
   },
 
-  captureFrame(timestamp: number): VideoFrame | null {
+  captureFrame(timestamp) {
     if (!captureCanvas) return null
 
     // Create VideoFrame from capture canvas (not visible canvas)
