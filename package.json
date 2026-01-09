@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "pnpm --filter @eddy/app dev",
     "build": "pnpm -r build",
@@ -11,13 +14,13 @@
     "test:run": "pnpm -r test:run",
     "test:browser": "pnpm --filter @eddy/codecs test:browser",
     "test:browser:run": "pnpm --filter @eddy/codecs test:browser:run",
-    "perf": "npx tsx scripts/perf-test.ts",
-    "types": "pnpm -r types"
+    "perf": "node --experimental-strip-types scripts/perf-test.ts",
+    "types": "pnpm -r types",
+    "sync-issues": "node --experimental-strip-types scripts/sync-graph-to-issues.ts"
   },
   "devDependencies": {
     "@types/audioworklet": "^0.0.92",
     "puppeteer": "^24.34.0",
-    "tsx": "^4.21.0",
     "typescript": "^5.7.0"
   },
   "dependencies": {
