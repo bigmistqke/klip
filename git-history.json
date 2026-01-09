@@ -1,0 +1,274 @@
+[
+  {
+    "hash": "bd6cf69f62c1c16f3da3d6c684e80c1aa8151ead",
+    "short_hash": "bd6cf69",
+    "author": "bigmistqke",
+    "date": "2026-01-09T12:25:18+01:00",
+    "message": "refactor: clip-based playback with worker pool\n\n- Add WorkerPool for reusing playback workers across clips\n- Change player from track-centric to clip-centric (TrackEntry → ClipEntry)\n- Frames now tagged with clipId, mapped to trackId in compositor\n- Add hasClipForTrack/isLoadingForTrack for track-based queries",
+    "files_changed": 6
+  },
+  {
+    "hash": "d041f494242c9f449e808f65660ef880d17b9a94",
+    "short_hash": "d041f49",
+    "author": "bigmistqke",
+    "date": "2026-01-09T03:35:53+01:00",
+    "message": "feat: add perf instrumentation to playback workers\n\n- Add perf marks for decode, demux, bufferAhead, transferFrame\n- Add getPerf() and resetPerf() RPC methods to workers\n- Add loadTestClip() method to editor for perf testing\n- Expose editor via __EDDY_DEBUG__ for automated testing\n- Improve perf-test.ts with proper editor integration and status checks",
+    "files_changed": 4
+  },
+  {
+    "hash": "9b026c7061e9a2b91db46760baa28a5d9b536a62",
+    "short_hash": "9b026c7",
+    "author": "bigmistqke",
+    "date": "2026-01-09T03:35:43+01:00",
+    "message": "fix: SolidJS store mutation bug and type errors\n\n- Fix track state not updating due to direct object mutation\n  instead of using setTracks() (SolidJS stores are proxies)\n- Fix connectToCompositor argument order (trackId, port)\n- Fix Timeline -> LayoutTimeline type import\n- Add getAllPerf() to collect stats from workers",
+    "files_changed": 2
+  },
+  {
+    "hash": "43026754c1fce8c2052537a75ffba3c665cb59fe",
+    "short_hash": "4302675",
+    "author": "bigmistqke",
+    "date": "2026-01-09T02:45:57+01:00",
+    "message": "chore: add deciduous decision graph workflow",
+    "files_changed": 16
+  },
+  {
+    "hash": "ab10d5ab2529330d3f59f0fc50fda3815f2cc139",
+    "short_hash": "ab10d5a",
+    "author": "bigmistqke",
+    "date": "2026-01-08T23:03:39+01:00",
+    "message": "refactor: clean up player and worker code\n\n- Rename renderCapture to renderToCaptureCanvas for clarity\n- Refactor getOrCreateTrack for early return pattern\n- Use object store pattern for tracks instead of Map\n- Minor formatting and type improvements across workers",
+    "files_changed": 8
+  },
+  {
+    "hash": "b4966d35a08ec34f6d1e4cf07def8e835c6f9d67",
+    "short_hash": "b4966d3",
+    "author": "bigmistqke",
+    "date": "2026-01-06T22:00:11+01:00",
+    "message": "refactor: remove redundant recording.worker.ts",
+    "files_changed": 1
+  },
+  {
+    "hash": "2c3f1139447930c35854ad93ec0b9985d6465586",
+    "short_hash": "2c3f113",
+    "author": "bigmistqke",
+    "date": "2026-01-06T21:59:36+01:00",
+    "message": "refactor: bikeshedding",
+    "files_changed": 3
+  },
+  {
+    "hash": "65255dcf0dc19de4f66a7243f88532e4866319a5",
+    "short_hash": "65255dc",
+    "author": "bigmistqke",
+    "date": "2026-01-06T21:58:49+01:00",
+    "message": "refactor: replace Map+versionTrack-signal with store",
+    "files_changed": 1
+  },
+  {
+    "hash": "c9fa80217ca67d366edb03a6d574416ee5c4d426",
+    "short_hash": "c9fa802",
+    "author": "bigmistqke",
+    "date": "2026-01-06T21:13:24+01:00",
+    "message": "refactor: bikeshed workers",
+    "files_changed": 8
+  },
+  {
+    "hash": "31340abdaa305cc7977e3a91247125f515c5c850",
+    "short_hash": "31340ab",
+    "author": "bigmistqke",
+    "date": "2026-01-06T20:05:44+01:00",
+    "message": "fix: show initial frame after loading clip\n\nSeek to current time after loadClip completes so the first\nframe is displayed immediately instead of waiting for play.",
+    "files_changed": 1
+  },
+  {
+    "hash": "8cb264ddabff63a7f7a293bdd4ad72e56bb3ae3e",
+    "short_hash": "8cb264d",
+    "author": "bigmistqke",
+    "date": "2026-01-06T20:03:49+01:00",
+    "message": "refactor: use playback workers in player instead of slots\n\n- Replace slot-based playback with per-track playback workers\n- Connect workers to compositor via MessageChannel for direct frame transfer\n- Track state with trackVersion signal for reactive hasClip/isLoading\n- Wait for loading tracks before starting playback\n- Add audio pipeline per track entry",
+    "files_changed": 1
+  },
+  {
+    "hash": "e612555279fc4c015187124281d88d2295b74cb2",
+    "short_hash": "e612555",
+    "author": "bigmistqke",
+    "date": "2026-01-06T20:03:43+01:00",
+    "message": "feat: add playback worker for demux/decode with frame streaming\n\n- Single worker per track handles demux + decode\n- Streams VideoFrames directly to compositor via MessagePort\n- Uses ring buffer with raw ArrayBuffer to avoid stale frames\n- Implements play/pause/seek with buffering ahead\n- Enhanced debug logging for decoder diagnostics",
+    "files_changed": 1
+  },
+  {
+    "hash": "ea3aaa1a5c4c3e94b6dbce84772e34f0de970629",
+    "short_hash": "ea3aaa1",
+    "author": "bigmistqke",
+    "date": "2026-01-06T20:03:35+01:00",
+    "message": "refactor: add worker-to-worker frame transfer to compositor\n\n- Add connectPlaybackWorker/disconnectPlaybackWorker methods\n- Use expose() with MessagePort for direct frame transfer from playback workers\n- Remove create-slot.ts (replaced by playback workers)\n- Simplify create-debug-info.ts to use player state accessors",
+    "files_changed": 3
+  },
+  {
+    "hash": "3ca0f4470a3875049dc49eee0421bd6f6fbaf9a9",
+    "short_hash": "3ca0f44",
+    "author": "bigmistqke",
+    "date": "2026-01-06T20:03:21+01:00",
+    "message": "fix: resolve type errors in playback and deep-resource\n\n- Export StoreAccessor interface from deep-resource.ts\n- Add @types/audioworklet to app tsconfig\n- Fix type-only import in audio-scheduler.ts",
+    "files_changed": 3
+  },
+  {
+    "hash": "a363d7540cbe38309107109d4a00920731c83435",
+    "short_hash": "a363d75",
+    "author": "bigmistqke",
+    "date": "2026-01-06T19:04:55+01:00",
+    "message": "style: move track controls next to sliders to prevent layout shift\n\n- Controls now always reserve space (hidden when no clip)\n- Buttons stacked vertically next to vol/pan sliders",
+    "files_changed": 2
+  },
+  {
+    "hash": "41ce4fb5a3b2f8dd01347b7a1a9e81bf59deee44",
+    "short_hash": "41ce4fb",
+    "author": "bigmistqke",
+    "date": "2026-01-06T19:03:07+01:00",
+    "message": "feat: render Editor UI from project data (Ticket 5)\n\n- Use trackId strings instead of numeric indices throughout editor\n- Iterate project.tracks directly with Index for reactive updates\n- Dynamic CSS grid columns/rows from group.layout\n- Preserve all tracks when publishing (even empty ones)\n- Fail explicitly if clip has no local blob and no remote source\n- Track component accepts trackId + displayIndex props",
+    "files_changed": 5
+  },
+  {
+    "hash": "ecd1bbe61db6097529a8cd9dd498f16f82e04862",
+    "short_hash": "ecd1bbe",
+    "author": "bigmistqke",
+    "date": "2026-01-06T18:49:45+01:00",
+    "message": "fix: don't re-upload remote stems when publishing\n\n- Skip clips with existing stem source in publishAction\n- Only add local recordings to clipBlobs for upload\n- Fix layout-resolver type error ('stem' → 'clip')",
+    "files_changed": 2
+  },
+  {
+    "hash": "726da7dd0d475805fa9d13c51ddbfd990e8b6979",
+    "short_hash": "726da7d",
+    "author": "bigmistqke",
+    "date": "2026-01-06T18:45:44+01:00",
+    "message": "refactor: simplify SegmentSource to single clip type\n\nRemove stem/local distinction - blob storage location is an\nimplementation detail handled by getClipBlob(), not a concern\nof the timeline/rendering layer.\n\nSegmentSource is now: clip | timeline (for nested groups)",
+    "files_changed": 2
+  },
+  {
+    "hash": "3155f9db10fac65e1a7949bfb3c004b285c882ee",
+    "short_hash": "3155f9d",
+    "author": "bigmistqke",
+    "date": "2026-01-06T18:42:18+01:00",
+    "message": "feat: refactor compositor to use layout timeline (Ticket 3)\n\n- Add setTimeline() to compositor, remove setGrid()\n- Change setFrame/setPreviewStream to use trackId instead of index\n- render(time) queries timeline for active segments\n- Dynamic texture pool keyed by trackId\n- Add viewport to LayoutSlot for preview rendering without clips\n- Add SegmentSourceLocal for local recordings not yet uploaded\n- Update player to accept project accessor and compile timeline\n- Update slot/editor to use trackId-based API\n- Always include all tracks in timeline (even without clips)",
+    "files_changed": 10
+  },
+  {
+    "hash": "036f6e8067c938dba072747d7c2522f14e332cbf",
+    "short_hash": "036f6e8",
+    "author": "bigmistqke",
+    "date": "2026-01-06T18:20:18+01:00",
+    "message": "test: add layout-resolver tests\n\n- Add vitest to app package\n- Add vitest.config.ts with path aliases\n- Add comprehensive tests for layout-resolver:\n  - compileLayoutTimeline (grid, stacked, void members, rootGroup)\n  - getActiveSegments (timing, localTime calculation)\n  - getSegmentsInRange (overlapping segments)\n  - getNextTransition (start/end transitions)\n  - Multiple clips per track",
+    "files_changed": 4
+  },
+  {
+    "hash": "d04b8a04cd0a29a113416cc940d26a09d5a5f0bf",
+    "short_hash": "d04b8a0",
+    "author": "bigmistqke",
+    "date": "2026-01-06T18:20:10+01:00",
+    "message": "feat: add layout resolver (Ticket 2)\n\nCompiles hierarchical Project data into flat LayoutTimeline for compositor.\n\n- layout-types.ts: LayoutTimeline, LayoutSlot, LayoutSegment, Viewport types\n- layout-resolver.ts: compileLayoutTimeline() and query helpers\n  - getActiveSegments(time) - segments active at given time\n  - getSegmentsInRange(start, end) - for pre-buffering\n  - getNextTransition(time) - next start/end event\n\nSupports grid layout, stacked layout, void members, rootGroup selection.",
+    "files_changed": 2
+  },
+  {
+    "hash": "e8d321181d7a44796acba056aacf1fbcd7f0fd22",
+    "short_hash": "e8d3211",
+    "author": "bigmistqke",
+    "date": "2026-01-06T18:19:58+01:00",
+    "message": "chore: add root tsconfig.json and pnpm types script\n\n- Add root tsconfig.json with shared compiler options\n- All package tsconfigs now extend from root\n- Add missing tsconfigs for utils, mixer, compositor\n- Add \"types\": \"pnpm -r types\" script to root package.json\n- Update CLAUDE.md with TypeScript check workflow",
+    "files_changed": 10
+  },
+  {
+    "hash": "7d30ce39746f01d4dc9ce638de0a05fbf6d1c3ea",
+    "short_hash": "7d30ce3",
+    "author": "bigmistqke",
+    "date": "2026-01-06T18:04:03+01:00",
+    "message": "fix: prevent AudioContext from being closed when using shared context\n\nThe audio scheduler was incorrectly closing the AudioContext when\ndestroy() was called, even when the context was obtained from the\ndestination's context property (e.g., audioPipeline.gain.context).\n\nSimplified by removing redundant audioContext option - now just use\ndestination.context if destination is provided, otherwise create own.\n\nFixes InvalidStateError when switching projects while playing.",
+    "files_changed": 2
+  },
+  {
+    "hash": "f92133656da1d979b4848fd8bd032b7499e18f13",
+    "short_hash": "f921336",
+    "author": "bigmistqke",
+    "date": "2026-01-06T18:01:13+01:00",
+    "message": "refactor: update lexicons for data-driven timeline architecture\n\n- Add rootGroup field to project (references timeline root group)\n- Add clipSource.stem and clipSource.group union types\n- Change clip.stem to clip.source union for nested compositions\n- Update crud.ts and create-editor.ts to use new source field\n- Add REFACTOR_PLAN.md with full architecture design\n\nPart of Ticket 1 from the refactor plan.",
+    "files_changed": 8
+  },
+  {
+    "hash": "9ff1684954be1500b2f970f1ee84db09e22d6602",
+    "short_hash": "9ff1684",
+    "author": "bigmistqke",
+    "date": "2026-01-06T16:49:47+01:00",
+    "message": "refactor: improve action() API and add JSDoc examples\n\n- Rename result() to latest() for clarity\n- Add comprehensive JSDoc examples for defer() and hold()\n- Extract utility functions to utils.ts (isGeneratorFunction, isObject, assertedNotNullish)\n- Use assertedNotNullish for cleaner null checks\n- Remove debug console.log",
+    "files_changed": 4
+  },
+  {
+    "hash": "73d4e59b435ef0f8e60cb59ff4f16be569e26e41",
+    "short_hash": "73d4e59",
+    "author": "bigmistqke",
+    "date": "2026-01-06T15:00:58+01:00",
+    "message": "docs: update CLAUDE.md and consolidate architecture docs\n\n- Update CLAUDE.md to reflect current codebase structure\n- Add monorepo structure, tech stack, key patterns\n- Document audio routing workaround for Chrome bug\n- Remove outdated DESIGN.md and MVP.md (content moved to ARCHITECTURE.md)",
+    "files_changed": 4
+  },
+  {
+    "hash": "03ed3a53b498938c9ebea27b5169a50a30249a58",
+    "short_hash": "03ed3a5",
+    "author": "bigmistqke",
+    "date": "2026-01-06T15:00:46+01:00",
+    "message": "fix: audio quality degradation when recording while playing back\n\nSymptoms: Recording while simultaneously playing back previous clips caused\nsubsequent recordings to have thin audio with phasing-like artifacts that\nfaded in and out. First recording always sounded fine.\n\nRoot cause: Chrome has a known bug where audio routed to AudioContext.destination\ninterferes with getUserMedia capture, even when echoCancellation is enabled.\nThe exact mechanism is unclear, but appears related to Chrome's browser-wide\naudio processing pipeline.\n\nFix: Route playback audio through MediaStreamAudioDestinationNode → HTMLAudioElement\ninstead of AudioContext.destination during recording. This bypasses the internal\naudio processing conflict.\n\nReferences:\n- https://groups.google.com/a/chromium.org/g/chromium-discuss/c/6s2EnqdBERE\n- https://dev.to/focused_dot_io/echo-cancellation-with-web-audio-api-and-chromium-1f8m\n\nAdditional fixes included:\n- Session-based capture in worker to prevent race conditions\n- Proper handling of interleaved vs planar audio formats\n- Use planar format for AudioData in muxer (f32-planar)",
+    "files_changed": 4
+  },
+  {
+    "hash": "1580cca78c90c7a2b57129833c93f596cc9daeaf",
+    "short_hash": "1580cca",
+    "author": "bigmistqke",
+    "date": "2026-01-06T11:25:16+01:00",
+    "message": "feat: add download button to track UI\n\nAdd ability to download clip from each track for debugging audio quality",
+    "files_changed": 4
+  },
+  {
+    "hash": "2280d96e2d458dbd68e50883aa5cf1fc32005e47",
+    "short_hash": "2280d96",
+    "author": "bigmistqke",
+    "date": "2026-01-06T11:25:06+01:00",
+    "message": "refactor: extract audio worklet processor to separate file\n\n- Move RingBufferProcessor to audio-ring-buffer-processor.ts\n- Use @bigmistqke/rpc for worklet communication\n- Simplify playback.ts by removing duplicate scheduling prevention\n- Increase default buffer ahead to 2 seconds",
+    "files_changed": 7
+  },
+  {
+    "hash": "5e37ff1a782fef920ed805b7337ac2d099344ce4",
+    "short_hash": "5e37ff1",
+    "author": "bigmistqke",
+    "date": "2026-01-06T11:24:48+01:00",
+    "message": "chore: clean up worker files\n\nRemove doc comments and minor formatting adjustments",
+    "files_changed": 7
+  },
+  {
+    "hash": "ca079e82216ed494281e47f5270f9d88d358f34f",
+    "short_hash": "ca079e8",
+    "author": "bigmistqke",
+    "date": "2026-01-05T22:38:58+01:00",
+    "message": "fix: fix audio scheduling related noise with ring buffer",
+    "files_changed": 6
+  },
+  {
+    "hash": "b9c9b9e1919a02159d572ccbcb22521503417511",
+    "short_hash": "b9c9b9e",
+    "author": "bigmistqke",
+    "date": "2026-01-05T22:00:51+01:00",
+    "message": "feat: add audio capture and muxing to recording pipeline",
+    "files_changed": 3
+  },
+  {
+    "hash": "dd840ad975b408a0cf65080e5d9edd14ce5d9c1f",
+    "short_hash": "dd840ad",
+    "author": "bigmistqke",
+    "date": "2026-01-05T21:56:29+01:00",
+    "message": "refactor: rename action.resolve() to action.promise()",
+    "files_changed": 2
+  },
+  {
+    "hash": "602a450701b2da92391b2ed3793f54e4b873f01e",
+    "short_hash": "602a450",
+    "author": "bigmistqke",
+    "date": "2026-01-05T21:50:14+01:00",
+    "message": "chore(debug): remove per-frame logging spam in render loop",
+    "files_changed": 1
+  }
+]
