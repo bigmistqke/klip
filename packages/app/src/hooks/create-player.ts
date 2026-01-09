@@ -6,14 +6,12 @@ import { createEffect, createMemo, on, type Accessor } from 'solid-js'
 import { createStore } from 'solid-js/store'
 import { compileLayoutTimeline } from '~/lib/layout-resolver'
 import type { LayoutTimeline } from '~/lib/layout-types'
+import { createWorkerPool, type WorkerPool, type PooledWorker } from '~/lib/worker-pool'
 import type { CompositorWorkerMethods } from '~/workers/compositor.worker'
 import CompositorWorker from '~/workers/compositor.worker?worker'
-import type { PlaybackWorkerMethods } from '~/workers/playback.worker'
-import PlaybackWorker from '~/workers/playback.worker?worker'
 import { createClock, type Clock } from './create-clock'
 
 type CompositorRPC = RPC<CompositorWorkerMethods>
-type PlaybackRPC = RPC<PlaybackWorkerMethods>
 
 const log = debug('player', false)
 const perf = getGlobalPerfMonitor()
@@ -40,14 +38,20 @@ export interface PlayerActions {
   seek: (time: number) => Promise<void>
   /** Toggle loop */
   setLoop: (enabled: boolean) => void
-  /** Load a clip into a track */
-  loadClip: (trackId: string, blob: Blob) => Promise<void>
-  /** Clear a clip from a track */
-  clearClip: (trackId: string) => void
-  /** Check if track has a clip */
-  hasClip: (trackId: string) => boolean
-  /** Check if track is currently loading a clip */
-  isLoading: (trackId: string) => boolean
+  /** Load a clip into a track. Returns the clipId. */
+  loadClip: (trackId: string, blob: Blob, clipId?: string) => Promise<string>
+  /** Clear a clip by clipId */
+  clearClip: (clipId: string) => void
+  /** Check if clip exists and is ready */
+  hasClip: (clipId: string) => boolean
+  /** Check if clip is currently loading */
+  isLoading: (clipId: string) => boolean
+  /** Check if any clip exists for a track */
+  hasClipForTrack: (trackId: string) => boolean
+  /** Check if any clip is loading for a track */
+  isLoadingForTrack: (trackId: string) => boolean
+  /** Get all clipIds for a track */
+  getClipsForTrack: (trackId: string) => string[]
   /** Set preview stream for recording */
   setPreviewSource: (trackId: string, stream: MediaStream | null) => void
   /** Set track volume */
@@ -97,12 +101,17 @@ export interface CreatePlayerOptions {
   project: Accessor<Project>
 }
 
-/** Track entry for managing playback workers */
+/** Track entry for audio routing */
 interface TrackEntry {
   trackId: string
-  worker: Worker
-  rpc: PlaybackRPC
   audioPipeline: AudioPipeline
+}
+
+/** Clip entry for managing playback workers */
+interface ClipEntry {
+  clipId: string
+  trackId: string
+  pooledWorker: PooledWorker
   duration: number
   state: 'idle' | 'loading' | 'ready' | 'playing' | 'paused'
 }
@@ -168,10 +177,16 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
   // Compile layout timeline from project (reactive)
   const timeline = createMemo(() => compileLayoutTimeline(project(), { width, height }))
 
-  // Track entries - keyed by trackId
+  // Worker pool for playback workers
+  const workerPool = createWorkerPool({ maxSize: 8 })
+
+  // Track entries - keyed by trackId (audio routing only)
   const [tracks, setTracks] = createStore<Record<string, TrackEntry>>({})
 
-  /** Get or create a track entry */
+  // Clip entries - keyed by clipId (playback workers)
+  const [clips, setClips] = createStore<Record<string, ClipEntry>>({})
+
+  /** Get or create a track entry (audio pipeline only) */
   function getOrCreateTrack(trackId: string): TrackEntry {
     const track = tracks[trackId]
 
@@ -181,33 +196,65 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
 
     log('creating track entry', { trackId })
 
-    // Create playback worker
-    const worker = new PlaybackWorker()
-    const playbackRpc = rpc<PlaybackWorkerMethods>(worker)
+    const newTrack: TrackEntry = {
+      trackId,
+      audioPipeline: createAudioPipeline(),
+    }
+    setTracks(trackId, newTrack)
 
-    // Create audio pipeline
-    const audioPipeline = createAudioPipeline()
+    return newTrack
+  }
+
+  /** Get or create a clip entry (playback worker) */
+  function getOrCreateClip(clipId: string, trackId: string): ClipEntry {
+    const clip = clips[clipId]
+
+    if (clip) {
+      return clip
+    }
+
+    log('creating clip entry', { clipId, trackId })
+
+    // Acquire worker from pool
+    const pooledWorker = workerPool.acquire()
 
     // Create MessageChannel for worker-to-worker communication
     const channel = new MessageChannel()
 
     // Send port1 to compositor (compositor listens)
-    compositorRpc.connectPlaybackWorker(trackId, transfer(channel.port1))
+    // Pass both clipId and trackId so compositor can route frames to the correct track
+    compositorRpc.connectPlaybackWorker(clipId, trackId, transfer(channel.port1))
 
     // Send port2 to playback worker (playback worker sends)
-    playbackRpc.connectToCompositor(trackId, transfer(channel.port2))
+    pooledWorker.rpc.connectToCompositor(clipId, transfer(channel.port2))
 
-    const newTrack: TrackEntry = {
+    const newClip: ClipEntry = {
+      clipId,
       trackId,
-      worker,
-      rpc: playbackRpc,
-      audioPipeline,
+      pooledWorker,
       duration: 0,
       state: 'idle',
     }
-    setTracks(trackId, newTrack)
+    setClips(clipId, newClip)
 
-    return newTrack
+    return newClip
+  }
+
+  /** Remove a clip entry */
+  function removeClip(clipId: string): void {
+    const clip = clips[clipId]
+
+    if (!clip) return
+
+    log('removing clip entry', { clipId })
+
+    // Disconnect from compositor
+    compositorRpc.disconnectPlaybackWorker(clipId)
+
+    // Release worker back to pool
+    workerPool.release(clip.pooledWorker)
+
+    setClips(clipId, undefined!)
   }
 
   /** Remove a track entry */
@@ -218,12 +265,12 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
 
     log('removing track entry', { trackId })
 
-    // Disconnect from compositor
-    compositorRpc.disconnectPlaybackWorker(trackId)
-
-    // Destroy playback worker
-    track.rpc.destroy()
-    track.worker.terminate()
+    // Remove all clips for this track
+    for (const clip of Object.values(clips)) {
+      if (clip.trackId === trackId) {
+        removeClip(clip.clipId)
+      }
+    }
 
     // Disconnect audio pipeline
     track.audioPipeline.disconnect()
@@ -240,16 +287,14 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
 
   // Derived max duration from timeline or playback workers
   const maxDuration = createMemo(() => {
-    // Track version to trigger recalc when tracks change
-
     // First check timeline duration
     const timelineDuration = timeline().duration
     if (timelineDuration > 0) return timelineDuration
 
-    // Fall back to playback durations
+    // Fall back to clip durations
     let max = 0
-    for (const track of Object.values(tracks)) {
-      max = Math.max(max, track.duration)
+    for (const clip of Object.values(clips)) {
+      max = Math.max(max, clip.duration)
     }
     return max
   })
@@ -274,10 +319,10 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
     if (playing && clock.loop() && maxDuration() > 0 && time >= maxDuration()) {
       log('loop reset')
       // Reset all playback workers to start
-      for (const track of Object.values(tracks)) {
-        if (track.state === 'playing') {
-          track.rpc.seek(0).then(() => {
-            track.rpc.play(0)
+      for (const clip of Object.values(clips)) {
+        if (clip.state === 'playing') {
+          clip.pooledWorker.rpc.seek(0).then(() => {
+            clip.pooledWorker.rpc.play(0)
           })
         }
       }
@@ -306,10 +351,18 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
   function destroy(): void {
     stopRenderLoop()
 
+    // Remove all clips
+    for (const clipId of Object.keys(clips)) {
+      removeClip(clipId)
+    }
+
     // Remove all tracks
     for (const trackId of Object.keys(tracks)) {
       removeTrack(trackId)
     }
+
+    // Destroy worker pool
+    workerPool.destroy()
 
     compositor.destroy()
   }
@@ -334,37 +387,37 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
       const startTime = time ?? clock.time()
       log('play', { startTime })
 
-      // Wait for any loading tracks to finish (with timeout)
-      const loadingTracks = Array.from(Object.values(tracks)).filter(
-        track => track.state === 'loading',
+      // Wait for any loading clips to finish (with timeout)
+      const loadingClips = Array.from(Object.values(clips)).filter(
+        clip => clip.state === 'loading',
       )
-      if (loadingTracks.length > 0) {
-        log('waiting for loading tracks', { count: loadingTracks.length })
+      if (loadingClips.length > 0) {
+        log('waiting for loading clips', { count: loadingClips.length })
         // Poll for loading completion with timeout
         const maxWait = 5000
         const startWait = performance.now()
-        while (loadingTracks.some(t => t.state === 'loading')) {
+        while (loadingClips.some(c => c.state === 'loading')) {
           if (performance.now() - startWait > maxWait) {
-            log('timeout waiting for tracks to load')
+            log('timeout waiting for clips to load')
             break
           }
           await new Promise(resolve => setTimeout(resolve, 50))
         }
       }
 
-      // Seek all tracks to start time first
-      const tracksWithClips = Array.from(Object.values(tracks)).filter(
-        track => track.state === 'ready' || track.state === 'paused',
+      // Seek all clips to start time first
+      const readyClips = Array.from(Object.values(clips)).filter(
+        clip => clip.state === 'ready' || clip.state === 'paused',
       )
 
-      log('play: tracks ready', { count: tracksWithClips.length })
+      log('play: clips ready', { count: readyClips.length })
 
-      await Promise.all(tracksWithClips.map(track => track.rpc.seek(startTime)))
+      await Promise.all(readyClips.map(clip => clip.pooledWorker.rpc.seek(startTime)))
 
       // Start all playback workers
-      for (const track of tracksWithClips) {
-        track.rpc.play(startTime)
-        setTracks(track.trackId, 'state', 'playing')
+      for (const clip of readyClips) {
+        clip.pooledWorker.rpc.play(startTime)
+        setClips(clip.clipId, 'state', 'playing')
       }
 
       clock.play(startTime)
@@ -375,10 +428,10 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
       log('pause')
 
       // Pause all playback workers
-      for (const track of Object.values(tracks)) {
-        if (track.state === 'playing') {
-          track.rpc.pause()
-          setTracks(track.trackId, 'state', 'paused')
+      for (const clip of Object.values(clips)) {
+        if (clip.state === 'playing') {
+          clip.pooledWorker.rpc.pause()
+          setClips(clip.clipId, 'state', 'paused')
         }
       }
 
@@ -390,13 +443,13 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
       clock.stop()
 
       // Pause and seek all playback workers to 0
-      for (const track of Object.values(tracks)) {
-        if (track.state === 'playing') {
-          track.rpc.pause()
+      for (const clip of Object.values(clips)) {
+        if (clip.state === 'playing') {
+          clip.pooledWorker.rpc.pause()
         }
-        if (track.state !== 'idle' && track.state !== 'loading') {
-          await track.rpc.seek(0)
-          setTracks(track.trackId, 'state', 'ready')
+        if (clip.state !== 'idle' && clip.state !== 'loading') {
+          await clip.pooledWorker.rpc.seek(0)
+          setClips(clip.clipId, 'state', 'ready')
         }
       }
     },
@@ -408,29 +461,29 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
       if (wasPlaying) {
         clock.pause()
         // Pause all playback workers
-        for (const track of Object.values(tracks)) {
-          if (track.state === 'playing') {
-            track.rpc.pause()
-            setTracks(track.trackId, 'state', 'paused')
+        for (const clip of Object.values(clips)) {
+          if (clip.state === 'playing') {
+            clip.pooledWorker.rpc.pause()
+            setClips(clip.clipId, 'state', 'paused')
           }
         }
       }
 
-      // Seek all tracks in parallel
+      // Seek all clips in parallel
       await Promise.all(
-        Array.from(Object.values(tracks))
-          .filter(track => track.state !== 'idle' && track.state !== 'loading')
-          .map(track => track.rpc.seek(time)),
+        Array.from(Object.values(clips))
+          .filter(clip => clip.state !== 'idle' && clip.state !== 'loading')
+          .map(clip => clip.pooledWorker.rpc.seek(time)),
       )
 
       clock.seek(time)
 
       if (wasPlaying) {
         // Resume playback
-        for (const track of Object.values(tracks)) {
-          if (track.state === 'paused') {
-            track.rpc.play(time)
-            setTracks(track.trackId, 'state', 'playing')
+        for (const clip of Object.values(clips)) {
+          if (clip.state === 'paused') {
+            clip.pooledWorker.rpc.play(time)
+            setClips(clip.clipId, 'state', 'playing')
           }
         }
         clock.play(time)
@@ -439,40 +492,67 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
 
     setLoop: clock.setLoop,
 
-    async loadClip(trackId: string, blob: Blob): Promise<void> {
-      log('loadClip', { trackId, blobSize: blob.size })
+    async loadClip(trackId: string, blob: Blob, clipId?: string): Promise<string> {
+      // Generate clipId if not provided
+      const resolvedClipId = clipId ?? `clip-${trackId}-${Date.now()}`
+      log('loadClip', { trackId, clipId: resolvedClipId, blobSize: blob.size })
 
-      const track = getOrCreateTrack(trackId)
-      setTracks(trackId, 'state', 'loading')
+      // Ensure track exists (for audio routing)
+      getOrCreateTrack(trackId)
+
+      // Get or create clip entry
+      const clip = getOrCreateClip(resolvedClipId, trackId)
+      setClips(resolvedClipId, 'state', 'loading')
 
       // Convert blob to ArrayBuffer and send to worker
       const buffer = await blob.arrayBuffer()
-      const { duration } = await track.rpc.load(buffer)
+      const { duration } = await clip.pooledWorker.rpc.load(buffer)
 
-      setTracks(trackId, 'duration', duration)
-      setTracks(trackId, 'state', 'ready')
+      setClips(resolvedClipId, 'duration', duration)
+      setClips(resolvedClipId, 'state', 'ready')
 
       // Seek to current time (or 0) to show initial frame
       const currentTime = clock.time()
-      await track.rpc.seek(currentTime)
+      await clip.pooledWorker.rpc.seek(currentTime)
 
-      log('loadClip complete', { trackId, duration })
+      log('loadClip complete', { clipId: resolvedClipId, duration })
+      return resolvedClipId
     },
 
-    clearClip(trackId: string): void {
-      log('clearClip', { trackId })
-      removeTrack(trackId)
+    clearClip(clipId: string): void {
+      log('clearClip', { clipId })
+      removeClip(clipId)
     },
 
-    hasClip(trackId: string): boolean {
-      // Subscribe to trackVersion for reactivity
-      const track = tracks[trackId]
-      return track?.state === 'ready' || track?.state === 'playing' || track?.state === 'paused'
+    hasClip(clipId: string): boolean {
+      const clip = clips[clipId]
+      return clip?.state === 'ready' || clip?.state === 'playing' || clip?.state === 'paused'
     },
 
-    isLoading(trackId: string): boolean {
-      // Subscribe to trackVersion for reactivity
-      return tracks[trackId]?.state === 'loading'
+    isLoading(clipId: string): boolean {
+      return clips[clipId]?.state === 'loading'
+    },
+
+    /** Check if any clip exists for a track (backwards-compatible) */
+    hasClipForTrack(trackId: string): boolean {
+      return Object.values(clips).some(
+        clip => clip.trackId === trackId &&
+          (clip.state === 'ready' || clip.state === 'playing' || clip.state === 'paused')
+      )
+    },
+
+    /** Check if any clip is loading for a track (backwards-compatible) */
+    isLoadingForTrack(trackId: string): boolean {
+      return Object.values(clips).some(
+        clip => clip.trackId === trackId && clip.state === 'loading'
+      )
+    },
+
+    /** Get all clipIds for a track */
+    getClipsForTrack(trackId: string): string[] {
+      return Object.values(clips)
+        .filter(clip => clip.trackId === trackId)
+        .map(clip => clip.clipId)
     },
 
     setPreviewSource(trackId: string, stream: MediaStream | null): void {
@@ -493,18 +573,18 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
     resetPerf: () => {
       perf.reset()
       // Reset worker perf too
-      for (const track of Object.values(tracks)) {
-        track.rpc.resetPerf()
+      for (const clip of Object.values(clips)) {
+        clip.pooledWorker.rpc.resetPerf()
       }
     },
     async getAllPerf() {
       const workerStats: Record<string, Record<string, any>> = {}
 
-      // Collect from all playback workers
+      // Collect from all playback workers (keyed by clipId)
       await Promise.all(
-        Object.entries(tracks).map(async ([trackId, track]) => {
+        Object.entries(clips).map(async ([clipId, clip]) => {
           try {
-            workerStats[trackId] = await track.rpc.getPerf()
+            workerStats[clipId] = await clip.pooledWorker.rpc.getPerf()
           } catch {
             // Worker might not be ready
           }

@@ -163,10 +163,10 @@ async function main() {
         const debug = (window as any).__EDDY_DEBUG__
         const player = debug?.player
         return {
-          hasClip0: player?.hasClip?.('track-0'),
-          hasClip1: player?.hasClip?.('track-1'),
-          isLoading0: player?.isLoading?.('track-0'),
-          isLoading1: player?.isLoading?.('track-1'),
+          hasClip0: player?.hasClipForTrack?.('track-0'),
+          hasClip1: player?.hasClipForTrack?.('track-1'),
+          isLoading0: player?.isLoadingForTrack?.('track-0'),
+          isLoading1: player?.isLoadingForTrack?.('track-1'),
         }
       })
       console.log(`⏳ Status check ${i + 1}/10:`, JSON.stringify(status))
@@ -187,10 +187,10 @@ async function main() {
           clipCount: t.clips?.length ?? 0,
           firstClipId: t.clips?.[0]?.id,
         })) ?? [],
-        hasClip0: player?.hasClip?.('track-0') ?? 'no hasClip',
-        hasClip1: player?.hasClip?.('track-1') ?? 'no hasClip',
-        isLoading0: player?.isLoading?.('track-0') ?? 'no isLoading',
-        isLoading1: player?.isLoading?.('track-1') ?? 'no isLoading',
+        hasClip0: player?.hasClipForTrack?.('track-0') ?? 'no hasClipForTrack',
+        hasClip1: player?.hasClipForTrack?.('track-1') ?? 'no hasClipForTrack',
+        isLoading0: player?.isLoadingForTrack?.('track-0') ?? 'no isLoadingForTrack',
+        isLoading1: player?.isLoadingForTrack?.('track-1') ?? 'no isLoadingForTrack',
       }
     })
     console.log('🔍 Debug info:', JSON.stringify(debugInfo, null, 2))

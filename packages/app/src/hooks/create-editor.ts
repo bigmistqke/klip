@@ -441,9 +441,9 @@ export function createEditor(options: CreateEditorOptions) {
             // Load new clip if available
             if (clip) {
               const blob = getClipBlob(clip.id)
-              if (blob && !_player.hasClip(trackId) && !_player.isLoading(trackId)) {
+              if (blob && !_player.hasClipForTrack(trackId) && !_player.isLoadingForTrack(trackId)) {
                 log('loading clip into player', { trackId, clipId: clip.id })
-                _player.loadClip(trackId, blob).catch(err => {
+                _player.loadClip(trackId, blob, clip.id).catch(err => {
                   console.error(`Failed to load clip for track ${trackId}:`, err)
                 })
               }

@@ -16,14 +16,14 @@ export interface CompositorWorkerMethods {
   /** Set a preview stream for a track (continuously reads latest frame) */
   setPreviewStream(trackId: string, stream: ReadableStream<VideoFrame> | null): void
 
-  /** Set a playback frame for a track (for time-synced playback) */
-  setFrame(trackId: string, frame: Transferred<VideoFrame> | null): void
+  /** Set a playback frame for a clip (for time-synced playback) */
+  setFrame(clipId: string, frame: Transferred<VideoFrame> | null): void
 
   /** Connect a playback worker via MessagePort (for direct worker-to-worker frame transfer) */
-  connectPlaybackWorker(trackId: string, port: MessagePort): void
+  connectPlaybackWorker(clipId: string, trackId: string, port: MessagePort): void
 
   /** Disconnect a playback worker */
-  disconnectPlaybackWorker(trackId: string): void
+  disconnectPlaybackWorker(clipId: string): void
 
   /** Render at time T (queries timeline internally) */
   render(time: number): void
@@ -135,14 +135,20 @@ const previewFrames = new Map<string, VideoFrame>()
 const playbackFrames = new Map<string, VideoFrame>()
 const previewReaders = new Map<string, ReadableStreamDefaultReader<VideoFrame>>()
 
-// Playback worker connections - keyed by trackId
+// Playback worker connections - keyed by clipId
 const playbackWorkerPorts = new Map<string, MessagePort>()
+
+// Mapping from clipId to trackId (for frame routing until layout refactor)
+const clipToTrack = new Map<string, string>()
 
 // Dynamic texture pool - keyed by trackId
 const textures = new Map<string, WebGLTexture>()
 const captureTextures = new Map<string, WebGLTexture>()
 
-function setFrame(trackId: string, frame: VideoFrame | null) {
+function setFrame(clipId: string, frame: VideoFrame | null) {
+  // Look up trackId for this clip (fall back to clipId for backwards compatibility)
+  const trackId = clipToTrack.get(clipId) ?? clipId
+
   // Close previous playback frame
   const prevFrame = playbackFrames.get(trackId)
   if (prevFrame) {
@@ -252,17 +258,18 @@ expose<CompositorWorkerMethods>({
     }
   },
 
-  connectPlaybackWorker(trackId, port) {
-    log('connectPlaybackWorker', { trackId })
+  connectPlaybackWorker(clipId, trackId, port) {
+    log('connectPlaybackWorker', { clipId, trackId })
 
-    // Disconnect existing port for this track
-    const existingPort = playbackWorkerPorts.get(trackId)
+    // Disconnect existing port for this clip
+    const existingPort = playbackWorkerPorts.get(clipId)
     if (existingPort) {
       existingPort.close()
     }
 
-    // Store the port
-    playbackWorkerPorts.set(trackId, port)
+    // Store the port and mapping
+    playbackWorkerPorts.set(clipId, port)
+    clipToTrack.set(clipId, trackId)
 
     // Expose setFrame method on this port for playback worker to call
     expose(
@@ -273,20 +280,26 @@ expose<CompositorWorkerMethods>({
     )
   },
 
-  disconnectPlaybackWorker(trackId) {
-    log('disconnectPlaybackWorker', { trackId })
+  disconnectPlaybackWorker(clipId) {
+    log('disconnectPlaybackWorker', { clipId })
 
-    const port = playbackWorkerPorts.get(trackId)
+    const port = playbackWorkerPorts.get(clipId)
     if (port) {
       port.close()
-      playbackWorkerPorts.delete(trackId)
+      playbackWorkerPorts.delete(clipId)
     }
 
+    // Get trackId before removing mapping
+    const trackId = clipToTrack.get(clipId)
+    clipToTrack.delete(clipId)
+
     // Close any remaining frame for this track
-    const frame = playbackFrames.get(trackId)
-    if (frame) {
-      frame.close()
-      playbackFrames.delete(trackId)
+    if (trackId) {
+      const frame = playbackFrames.get(trackId)
+      if (frame) {
+        frame.close()
+        playbackFrames.delete(trackId)
+      }
     }
   },
 

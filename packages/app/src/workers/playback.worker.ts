@@ -15,7 +15,7 @@ const perf = createPerfMonitor()
 
 /** Methods exposed by compositor worker (subset we need) */
 interface CompositorFrameMethods {
-  setFrame(trackId: string, frame: VideoFrame | null): void
+  setFrame(clipId: string, frame: VideoFrame | null): void
 }
 
 /** Worker state */
@@ -257,7 +257,7 @@ const BUFFER_MAX_FRAMES = 30
 
 /** Worker state */
 let state: WorkerState = 'idle'
-let trackId: string = ''
+let clipId: string = ''
 
 // Demuxer state
 let input: Input | null = null
@@ -582,7 +582,7 @@ function sendFrameToCompositor(time: number): void {
     // No frame available - clear if we had one
     if (lastSentTimestamp !== null) {
       lastSentTimestamp = null
-      compositor.setFrame(trackId, null)
+      compositor.setFrame(clipId, null)
     }
     return
   }
@@ -596,7 +596,7 @@ function sendFrameToCompositor(time: number): void {
   perf.start('transferFrame')
   const frame = dataToFrame(frameData)
   lastSentTimestamp = frameData.timestamp
-  compositor.setFrame(trackId, transfer(frame))
+  compositor.setFrame(clipId, transfer(frame))
   perf.end('transferFrame')
 }
 
@@ -737,8 +737,8 @@ expose<PlaybackWorkerMethods>({
   },
 
   connectToCompositor(id, port) {
-    log('connectToCompositor', { id })
-    trackId = id
+    log('connectToCompositor', { clipId: id })
+    clipId = id
     compositor = rpc<CompositorFrameMethods>(port)
   },
 
