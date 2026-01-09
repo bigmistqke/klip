@@ -1,7 +1,7 @@
 import { expose, transfer, type Transferred } from '@bigmistqke/rpc/messenger'
 import { compile, glsl, uniform } from '@bigmistqke/view.gl/tag'
 import { debug } from '@eddy/utils'
-import { getActiveSegments } from '~/lib/layout-resolver'
+import { getActivePlacements } from '~/lib/timeline-compiler'
 import type { LayoutTimeline, Viewport } from '~/lib/layout-types'
 
 const log = debug('compositor-worker', false)
@@ -20,7 +20,7 @@ export interface CompositorWorkerMethods {
   setFrame(clipId: string, frame: Transferred<VideoFrame> | null): void
 
   /** Connect a playback worker via MessagePort (for direct worker-to-worker frame transfer) */
-  connectPlaybackWorker(clipId: string, trackId: string, port: MessagePort): void
+  connectPlaybackWorker(clipId: string, port: MessagePort): void
 
   /** Disconnect a playback worker */
   disconnectPlaybackWorker(clipId: string): void
@@ -29,7 +29,7 @@ export interface CompositorWorkerMethods {
   render(time: number): void
 
   /** Set a frame on capture canvas (for pre-rendering, doesn't affect visible canvas) */
-  setCaptureFrame(trackId: string, frame: Transferred<VideoFrame> | null): void
+  setCaptureFrame(clipId: string, frame: Transferred<VideoFrame> | null): void
 
   /** Render to capture canvas at time T */
   renderToCaptureCanvas(time: number): void
@@ -70,16 +70,16 @@ function createVideoTexture(glCtx: WebGL2RenderingContext | WebGLRenderingContex
   return texture
 }
 
-/** Get or create a texture for a trackId */
+/** Get or create a texture for a clipId */
 function getOrCreateTexture(
   glCtx: WebGL2RenderingContext | WebGLRenderingContext,
   textureMap: Map<string, WebGLTexture>,
-  trackId: string,
+  clipId: string,
 ): WebGLTexture {
-  let texture = textureMap.get(trackId)
+  let texture = textureMap.get(clipId)
   if (!texture) {
     texture = createVideoTexture(glCtx)
-    textureMap.set(trackId, texture)
+    textureMap.set(clipId, texture)
   }
   return texture
 }
@@ -130,35 +130,31 @@ let captureProgram: WebGLProgram | null = null
 // Current layout timeline
 let timeline: LayoutTimeline | null = null
 
-// Frame sources - keyed by trackId
-const previewFrames = new Map<string, VideoFrame>()
+// Frame sources - keyed by clipId
 const playbackFrames = new Map<string, VideoFrame>()
+
+// Preview frames - keyed by trackId (for camera preview during recording)
+const previewFrames = new Map<string, VideoFrame>()
 const previewReaders = new Map<string, ReadableStreamDefaultReader<VideoFrame>>()
 
 // Playback worker connections - keyed by clipId
 const playbackWorkerPorts = new Map<string, MessagePort>()
 
-// Mapping from clipId to trackId (for frame routing until layout refactor)
-const clipToTrack = new Map<string, string>()
-
-// Dynamic texture pool - keyed by trackId
+// Dynamic texture pool - keyed by clipId
 const textures = new Map<string, WebGLTexture>()
 const captureTextures = new Map<string, WebGLTexture>()
 
 function setFrame(clipId: string, frame: VideoFrame | null) {
-  // Look up trackId for this clip (fall back to clipId for backwards compatibility)
-  const trackId = clipToTrack.get(clipId) ?? clipId
-
   // Close previous playback frame
-  const prevFrame = playbackFrames.get(trackId)
+  const prevFrame = playbackFrames.get(clipId)
   if (prevFrame) {
     prevFrame.close()
   }
 
   if (frame) {
-    playbackFrames.set(trackId, frame)
+    playbackFrames.set(clipId, frame)
   } else {
-    playbackFrames.delete(trackId)
+    playbackFrames.delete(clipId)
   }
 }
 
@@ -198,15 +194,11 @@ expose<CompositorWorkerMethods>({
 
     // Main canvas (visible)
     canvas = offscreenCanvas
-    canvas.width = width
-    canvas.height = height
-
     gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
-    if (!gl) throw new Error('WebGL not supported in worker')
 
-    log('WebGL context created', {
-      version: gl instanceof WebGL2RenderingContext ? 'webgl2' : 'webgl',
-    })
+    if (!gl) {
+      throw new Error('WebGL not supported')
+    }
 
     // Compile shader for main canvas
     const compiled = compile.toQuad(gl, fragmentShader)
@@ -215,24 +207,22 @@ expose<CompositorWorkerMethods>({
 
     gl.useProgram(program)
 
-    // Capture canvas (for pre-rendering, not visible)
+    // Capture canvas (for pre-rendering, same size)
     captureCanvas = new OffscreenCanvas(width, height)
     captureGl = captureCanvas.getContext('webgl2') || captureCanvas.getContext('webgl')
-    if (!captureGl) throw new Error('WebGL not supported for capture canvas')
 
-    // Compile shader for capture canvas
-    const captureCompiled = compile.toQuad(captureGl, fragmentShader)
-    captureView = captureCompiled.view as CompositorView
-    captureProgram = captureCompiled.program
+    if (captureGl) {
+      const captureCompiled = compile.toQuad(captureGl, fragmentShader)
+      captureView = captureCompiled.view as CompositorView
+      captureProgram = captureCompiled.program
 
-    captureGl.useProgram(captureProgram)
-
-    log('init complete (with capture canvas)')
+      captureGl.useProgram(captureProgram)
+    }
   },
 
   setTimeline(newTimeline) {
-    log('setTimeline', { duration: newTimeline.duration, slotCount: newTimeline.slots.length })
     timeline = newTimeline
+    log('setTimeline', { duration: timeline.duration, segments: timeline.segments.length })
   },
 
   setPreviewStream(trackId, stream) {
@@ -258,8 +248,8 @@ expose<CompositorWorkerMethods>({
     }
   },
 
-  connectPlaybackWorker(clipId, trackId, port) {
-    log('connectPlaybackWorker', { clipId, trackId })
+  connectPlaybackWorker(clipId, port) {
+    log('connectPlaybackWorker', { clipId })
 
     // Disconnect existing port for this clip
     const existingPort = playbackWorkerPorts.get(clipId)
@@ -267,9 +257,8 @@ expose<CompositorWorkerMethods>({
       existingPort.close()
     }
 
-    // Store the port and mapping
+    // Store the port
     playbackWorkerPorts.set(clipId, port)
-    clipToTrack.set(clipId, trackId)
 
     // Expose setFrame method on this port for playback worker to call
     expose(
@@ -289,17 +278,11 @@ expose<CompositorWorkerMethods>({
       playbackWorkerPorts.delete(clipId)
     }
 
-    // Get trackId before removing mapping
-    const trackId = clipToTrack.get(clipId)
-    clipToTrack.delete(clipId)
-
-    // Close any remaining frame for this track
-    if (trackId) {
-      const frame = playbackFrames.get(trackId)
-      if (frame) {
-        frame.close()
-        playbackFrames.delete(trackId)
-      }
+    // Close any remaining frame for this clip
+    const frame = playbackFrames.get(clipId)
+    if (frame) {
+      frame.close()
+      playbackFrames.delete(clipId)
     }
   },
 
@@ -313,23 +296,22 @@ expose<CompositorWorkerMethods>({
     gl.clearColor(0.1, 0.1, 0.1, 1.0)
     gl.clear(gl.COLOR_BUFFER_BIT)
 
-    // Query timeline for active segments at this time
-    const activeSegments = getActiveSegments(timeline, time)
+    // Query timeline for active placements at this time
+    const activePlacements = getActivePlacements(timeline, time)
 
-    // Draw playback frames for active segments
-    for (const { segment } of activeSegments) {
-      const trackId = segment.trackId
-      const frame = playbackFrames.get(trackId)
+    // Draw playback frames for active placements
+    for (const { placement } of activePlacements) {
+      const frame = playbackFrames.get(placement.clipId)
       if (!frame) continue
 
-      const texture = getOrCreateTexture(gl, textures, trackId)
+      const texture = getOrCreateTexture(gl, textures, placement.clipId)
 
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, texture)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame)
 
       // Convert viewport to WebGL coordinates (y flipped)
-      const vp = viewportToWebGL(segment.viewport, canvas.height)
+      const vp = viewportToWebGL(placement.viewport, canvas.height)
       gl.viewport(vp.x, vp.y, vp.width, vp.height)
 
       view.uniforms.u_video.set(0)
@@ -337,20 +319,20 @@ expose<CompositorWorkerMethods>({
       gl.drawArrays(gl.TRIANGLES, 0, 6)
     }
 
-    // Draw preview frames on top (overlay layer) - use slot viewports
-    // Preview can render even without clips (for recording)
-    for (const slot of timeline.slots) {
-      const frame = previewFrames.get(slot.trackId)
-      if (!frame) continue
+    // Draw preview frames on top (overlay layer)
+    // Preview uses trackId since it's for camera preview during recording
+    for (const [trackId, frame] of previewFrames) {
+      // Find viewport for this track from active placements
+      const placement = activePlacements.find(p => p.placement.trackId === trackId)
+      if (!placement) continue
 
-      const texture = getOrCreateTexture(gl, textures, slot.trackId)
+      const texture = getOrCreateTexture(gl, textures, `preview-${trackId}`)
 
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, texture)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame)
 
-      // Use slot viewport (not segment viewport)
-      const vp = viewportToWebGL(slot.viewport, canvas.height)
+      const vp = viewportToWebGL(placement.placement.viewport, canvas.height)
       gl.viewport(vp.x, vp.y, vp.width, vp.height)
 
       view.uniforms.u_video.set(0)
@@ -360,52 +342,42 @@ expose<CompositorWorkerMethods>({
   },
 
   // Set a frame on the capture canvas (for pre-rendering)
-  setCaptureFrame(trackId, frame) {
+  setCaptureFrame(clipId, frame) {
     if (!captureGl) return
 
-    const texture = getOrCreateTexture(captureGl, captureTextures, trackId)
+    const texture = getOrCreateTexture(captureGl, captureTextures, clipId)
 
     captureGl.activeTexture(captureGl.TEXTURE0)
     captureGl.bindTexture(captureGl.TEXTURE_2D, texture)
 
     if (frame) {
-      captureGl.texImage2D(
-        captureGl.TEXTURE_2D,
-        0,
-        captureGl.RGBA,
-        captureGl.RGBA,
-        captureGl.UNSIGNED_BYTE,
-        frame,
-      )
-      frame.close() // Close after upload
+      captureGl.texImage2D(captureGl.TEXTURE_2D, 0, captureGl.RGBA, captureGl.RGBA, captureGl.UNSIGNED_BYTE, frame)
+      frame.close()
     }
   },
 
-  // Render to the capture canvas (for pre-rendering)
   renderToCaptureCanvas(time) {
     if (!captureGl || !captureCanvas || !captureView || !captureProgram || !timeline) return
 
     captureGl.useProgram(captureProgram)
 
-    // Clear entire canvas with dark background
+    // Clear
     captureGl.viewport(0, 0, captureCanvas.width, captureCanvas.height)
     captureGl.clearColor(0.1, 0.1, 0.1, 1.0)
     captureGl.clear(captureGl.COLOR_BUFFER_BIT)
 
-    // Query timeline for active segments at this time
-    const activeSegments = getActiveSegments(timeline, time)
+    // Query timeline for active placements
+    const activePlacements = getActivePlacements(timeline, time)
 
-    // Draw each active segment
-    for (const { segment } of activeSegments) {
-      const trackId = segment.trackId
-      const texture = captureTextures.get(trackId)
+    // Draw each active placement
+    for (const { placement } of activePlacements) {
+      const texture = captureTextures.get(placement.clipId)
       if (!texture) continue
 
       captureGl.activeTexture(captureGl.TEXTURE0)
       captureGl.bindTexture(captureGl.TEXTURE_2D, texture)
 
-      // Convert viewport to WebGL coordinates (y flipped)
-      const vp = viewportToWebGL(segment.viewport, captureCanvas.height)
+      const vp = viewportToWebGL(placement.viewport, captureCanvas.height)
       captureGl.viewport(vp.x, vp.y, vp.width, vp.height)
 
       captureView.uniforms.u_video.set(0)
@@ -417,22 +389,25 @@ expose<CompositorWorkerMethods>({
   captureFrame(timestamp) {
     if (!captureCanvas) return null
 
-    // Create VideoFrame from capture canvas (not visible canvas)
-    try {
-      const frame = new VideoFrame(captureCanvas, {
-        timestamp, // microseconds
-        alpha: 'discard',
-      })
-      // Transfer back to caller
-      return transfer(frame) as unknown as VideoFrame
-    } catch (e) {
-      log('captureFrame: error', { error: e })
-      return null
-    }
+    return new VideoFrame(captureCanvas, {
+      timestamp,
+      alpha: 'discard',
+    })
   },
 
   destroy() {
     log('destroy')
+
+    // Close all frames
+    for (const frame of playbackFrames.values()) {
+      frame.close()
+    }
+    playbackFrames.clear()
+
+    for (const frame of previewFrames.values()) {
+      frame.close()
+    }
+    previewFrames.clear()
 
     // Cancel all preview readers
     for (const reader of previewReaders.values()) {
@@ -440,48 +415,14 @@ expose<CompositorWorkerMethods>({
     }
     previewReaders.clear()
 
-    // Close all preview frames
-    for (const frame of previewFrames.values()) {
-      frame.close()
-    }
-    previewFrames.clear()
-
-    // Close all playback frames
-    for (const frame of playbackFrames.values()) {
-      frame.close()
-    }
-    playbackFrames.clear()
-
-    // Close all playback worker ports
+    // Close all ports
     for (const port of playbackWorkerPorts.values()) {
       port.close()
     }
     playbackWorkerPorts.clear()
 
-    // Clean up main canvas WebGL resources
-    if (gl) {
-      for (const texture of textures.values()) {
-        gl.deleteTexture(texture)
-      }
-      textures.clear()
-    }
-
-    // Clean up capture canvas WebGL resources
-    if (captureGl) {
-      for (const texture of captureTextures.values()) {
-        captureGl.deleteTexture(texture)
-      }
-      captureTextures.clear()
-    }
-
-    canvas = null
-    gl = null
-    view = null
-    program = null
-    captureCanvas = null
-    captureGl = null
-    captureView = null
-    captureProgram = null
-    timeline = null
+    // Clear textures
+    textures.clear()
+    captureTextures.clear()
   },
 })

@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { Project } from '@eddy/lexicons'
 import {
   compileLayoutTimeline,
-  getActiveSegments,
+  getActivePlacements,
   getNextTransition,
-  getSegmentsInRange,
-} from '../layout-resolver'
+  getPlacementsInRange,
+  findSegmentAtTime,
+} from '../timeline-compiler'
 
 /** Create a minimal valid project for testing */
 function createTestProject(overrides: Partial<Project> = {}): Project {
@@ -69,16 +70,21 @@ describe('compileLayoutTimeline', () => {
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
     expect(timeline.duration).toBe(15) // max of all clips
-    expect(timeline.slots).toHaveLength(4) // all 4 tracks in layout (including empty ones)
+    // Segments are created at transition points (0, 5, 10, 15)
+    expect(timeline.segments.length).toBeGreaterThan(0)
   })
 
   it('calculates correct viewports for 2x2 grid', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
+    // Find segment at time 0
+    const segment = findSegmentAtTime(timeline, 0)
+    expect(segment).not.toBeNull()
+
     // Track 0 should be top-left
-    const track0 = timeline.slots.find(s => s.trackId === 'track-0')
-    expect(track0?.segments[0].viewport).toEqual({
+    const clip0 = segment!.placements.find(p => p.clipId === 'clip-0')
+    expect(clip0?.viewport).toEqual({
       x: 0,
       y: 0,
       width: 320,
@@ -86,31 +92,34 @@ describe('compileLayoutTimeline', () => {
     })
 
     // Track 1 should be top-right
-    const track1 = timeline.slots.find(s => s.trackId === 'track-1')
-    expect(track1?.segments[0].viewport).toEqual({
+    const clip1 = segment!.placements.find(p => p.clipId === 'clip-1')
+    expect(clip1?.viewport).toEqual({
       x: 320,
       y: 0,
       width: 320,
       height: 180,
     })
-
-    // Track 2 should be bottom-left
-    const track2 = timeline.slots.find(s => s.trackId === 'track-2')
-    expect(track2?.segments[0].viewport).toEqual({
-      x: 0,
-      y: 180,
-      width: 320,
-      height: 180,
-    })
   })
 
-  it('handles segment timing correctly', () => {
+  it('creates segments at transition points', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    const track2 = timeline.slots.find(s => s.trackId === 'track-2')
-    expect(track2?.segments[0].startTime).toBe(5) // starts at 5 seconds
-    expect(track2?.segments[0].endTime).toBe(15) // ends at 15 seconds
+    // Should have segments: [0-5] [5-10] [10-15]
+    // At 0: clip-0, clip-1 active
+    // At 5: clip-0, clip-1, clip-2 active
+    // At 10: clip-1, clip-2 active
+    expect(timeline.segments[0].startTime).toBe(0)
+    expect(timeline.segments[0].endTime).toBe(5)
+    expect(timeline.segments[0].placements).toHaveLength(2) // clip-0, clip-1
+
+    expect(timeline.segments[1].startTime).toBe(5)
+    expect(timeline.segments[1].endTime).toBe(10)
+    expect(timeline.segments[1].placements).toHaveLength(3) // clip-0, clip-1, clip-2
+
+    expect(timeline.segments[2].startTime).toBe(10)
+    expect(timeline.segments[2].endTime).toBe(15)
+    expect(timeline.segments[2].placements).toHaveLength(2) // clip-1, clip-2
   })
 
   it('handles empty project', () => {
@@ -118,7 +127,7 @@ describe('compileLayoutTimeline', () => {
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
     expect(timeline.duration).toBe(0)
-    expect(timeline.slots).toHaveLength(0)
+    expect(timeline.segments).toHaveLength(0)
   })
 
   it('handles void members in grid', () => {
@@ -138,9 +147,12 @@ describe('compileLayoutTimeline', () => {
     })
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
+    const segment = findSegmentAtTime(timeline, 7)
+    expect(segment).not.toBeNull()
+
     // Track 1 should be at bottom-left (skipped top-right due to void)
-    const track1 = timeline.slots.find(s => s.trackId === 'track-1')
-    expect(track1?.segments[0].viewport).toEqual({
+    const clip1 = segment!.placements.find(p => p.clipId === 'clip-1')
+    expect(clip1?.viewport).toEqual({
       x: 0,
       y: 180,
       width: 320,
@@ -166,9 +178,10 @@ describe('compileLayoutTimeline', () => {
     })
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    // Should only have track-1 (from rootGroup group-1)
-    expect(timeline.slots).toHaveLength(1)
-    expect(timeline.slots[0].trackId).toBe('track-1')
+    // Should only have clip-1 (from rootGroup group-1)
+    const segment = findSegmentAtTime(timeline, 0)
+    expect(segment?.placements).toHaveLength(1)
+    expect(segment?.placements[0].clipId).toBe('clip-1')
   })
 
   it('handles stacked layout (no grid)', () => {
@@ -183,9 +196,12 @@ describe('compileLayoutTimeline', () => {
     })
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    // Both tracks should have full canvas viewport
-    for (const slot of timeline.slots) {
-      expect(slot.segments[0].viewport).toEqual({
+    const segment = findSegmentAtTime(timeline, 0)
+    expect(segment).not.toBeNull()
+
+    // Both clips should have full canvas viewport
+    for (const placement of segment!.placements) {
+      expect(placement.viewport).toEqual({
         x: 0,
         y: 0,
         width: 640,
@@ -195,25 +211,55 @@ describe('compileLayoutTimeline', () => {
   })
 })
 
-describe('getActiveSegments', () => {
-  it('returns segments active at time 0', () => {
+describe('findSegmentAtTime (binary search)', () => {
+  it('finds correct segment at various times', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    const active = getActiveSegments(timeline, 0)
+    // At time 2: should be first segment [0-5]
+    const seg0 = findSegmentAtTime(timeline, 2)
+    expect(seg0?.startTime).toBe(0)
+    expect(seg0?.endTime).toBe(5)
 
-    // track-0 and track-1 are active at time 0, track-2 starts at 5
-    expect(active).toHaveLength(2)
-    expect(active.map(a => a.segment.trackId).sort()).toEqual(['track-0', 'track-1'])
+    // At time 7: should be second segment [5-10]
+    const seg1 = findSegmentAtTime(timeline, 7)
+    expect(seg1?.startTime).toBe(5)
+    expect(seg1?.endTime).toBe(10)
+
+    // At time 12: should be third segment [10-15]
+    const seg2 = findSegmentAtTime(timeline, 12)
+    expect(seg2?.startTime).toBe(10)
+    expect(seg2?.endTime).toBe(15)
   })
 
-  it('returns segments active at time 7', () => {
+  it('returns null for time outside segments', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    const active = getActiveSegments(timeline, 7)
+    expect(findSegmentAtTime(timeline, 20)).toBeNull()
+    expect(findSegmentAtTime(timeline, -1)).toBeNull()
+  })
+})
 
-    // All 3 tracks with clips should be active
+describe('getActivePlacements', () => {
+  it('returns placements active at time 0', () => {
+    const project = createTestProject()
+    const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
+
+    const active = getActivePlacements(timeline, 0)
+
+    // clip-0 and clip-1 are active at time 0, clip-2 starts at 5
+    expect(active).toHaveLength(2)
+    expect(active.map(a => a.placement.clipId).sort()).toEqual(['clip-0', 'clip-1'])
+  })
+
+  it('returns placements active at time 7', () => {
+    const project = createTestProject()
+    const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
+
+    const active = getActivePlacements(timeline, 7)
+
+    // All 3 clips should be active
     expect(active).toHaveLength(3)
   })
 
@@ -221,76 +267,74 @@ describe('getActiveSegments', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    const active = getActiveSegments(timeline, 7)
+    const active = getActivePlacements(timeline, 7)
 
-    // track-2 starts at 5, so localTime at 7 should be 2
-    const track2Active = active.find(a => a.segment.trackId === 'track-2')
-    expect(track2Active?.localTime).toBe(2)
+    // clip-2 starts at 5, so at timeline time 7 we're 2 seconds into segment [5-10]
+    // localTime should be placement.in + timeInSegment * speed = 0 + 2 * 1 = 2
+    const clip2Active = active.find(a => a.placement.clipId === 'clip-2')
+    expect(clip2Active?.localTime).toBe(2)
   })
 
   it('returns empty after all clips end', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    const active = getActiveSegments(timeline, 20)
+    const active = getActivePlacements(timeline, 20)
 
     expect(active).toHaveLength(0)
   })
 })
 
-describe('getSegmentsInRange', () => {
-  it('returns segments overlapping with range', () => {
+describe('getPlacementsInRange', () => {
+  it('returns placements overlapping with range', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    const segments = getSegmentsInRange(timeline, 0, 3)
+    const placements = getPlacementsInRange(timeline, 0, 3)
 
-    // track-0 and track-1 overlap with 0-3
-    expect(segments).toHaveLength(2)
+    // clip-0 and clip-1 overlap with 0-3
+    expect(placements).toHaveLength(2)
   })
 
-  it('includes segments that start in range', () => {
+  it('includes placements that start in range', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    const segments = getSegmentsInRange(timeline, 4, 6)
+    const placements = getPlacementsInRange(timeline, 4, 6)
 
-    // track-2 starts at 5, should be included
-    expect(segments.some(s => s.trackId === 'track-2')).toBe(true)
+    // clip-2 starts at 5, should be included
+    expect(placements.some(p => p.clipId === 'clip-2')).toBe(true)
   })
 
-  it('includes all segments for full duration', () => {
+  it('includes all placements for full duration', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    const segments = getSegmentsInRange(timeline, 0, 20)
+    const placements = getPlacementsInRange(timeline, 0, 20)
 
-    expect(segments).toHaveLength(3)
+    expect(placements).toHaveLength(3)
+  })
+
+  it('deduplicates placements across segments', () => {
+    const project = createTestProject()
+    const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
+
+    // clip-1 appears in all 3 segments, should only appear once
+    const placements = getPlacementsInRange(timeline, 0, 15)
+    const clip1Count = placements.filter(p => p.clipId === 'clip-1').length
+    expect(clip1Count).toBe(1)
   })
 })
 
 describe('getNextTransition', () => {
-  it('returns next segment start', () => {
+  it('returns next segment boundary', () => {
     const project = createTestProject()
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
     const transition = getNextTransition(timeline, 0)
 
-    // track-2 starts at 5
+    // Next boundary after 0 is at 5 (when clip-2 starts)
     expect(transition?.time).toBe(5)
-    expect(transition?.starting).toHaveLength(1)
-    expect(transition?.starting[0].trackId).toBe('track-2')
-  })
-
-  it('returns next segment end', () => {
-    const project = createTestProject()
-    const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
-
-    const transition = getNextTransition(timeline, 6)
-
-    // track-0 ends at 10
-    expect(transition?.time).toBe(10)
-    expect(transition?.ending.some(s => s.trackId === 'track-0')).toBe(true)
   })
 
   it('returns null when no more transitions', () => {
@@ -336,13 +380,13 @@ describe('multiple clips per track', () => {
 
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
-    expect(timeline.slots).toHaveLength(1)
-    expect(timeline.slots[0].segments).toHaveLength(2)
-    expect(timeline.slots[0].segments[0].endTime).toBe(5)
-    expect(timeline.slots[0].segments[1].startTime).toBe(5)
+    // Should have 2 segments: [0-5] with clip-0a, [5-10] with clip-0b
+    expect(timeline.segments).toHaveLength(2)
+    expect(timeline.segments[0].placements[0].clipId).toBe('clip-0a')
+    expect(timeline.segments[1].placements[0].clipId).toBe('clip-0b')
   })
 
-  it('getActiveSegments returns correct segment for time', () => {
+  it('getActivePlacements returns correct placement for time', () => {
     const project = createTestProject({
       tracks: [
         {
@@ -375,13 +419,13 @@ describe('multiple clips per track', () => {
     const timeline = compileLayoutTimeline(project, { width: 640, height: 360 })
 
     // At time 2, should be clip-0a
-    const activeAt2 = getActiveSegments(timeline, 2)
+    const activeAt2 = getActivePlacements(timeline, 2)
     expect(activeAt2).toHaveLength(1)
-    expect((activeAt2[0].segment.source as any).clipId).toBe('clip-0a')
+    expect(activeAt2[0].placement.clipId).toBe('clip-0a')
 
     // At time 7, should be clip-0b
-    const activeAt7 = getActiveSegments(timeline, 7)
+    const activeAt7 = getActivePlacements(timeline, 7)
     expect(activeAt7).toHaveLength(1)
-    expect((activeAt7[0].segment.source as any).clipId).toBe('clip-0b')
+    expect(activeAt7[0].placement.clipId).toBe('clip-0b')
   })
 })

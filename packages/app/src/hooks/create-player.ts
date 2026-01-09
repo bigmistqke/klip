@@ -4,7 +4,7 @@ import { createAudioPipeline, type AudioPipeline } from '@eddy/mixer'
 import { debug, getGlobalPerfMonitor } from '@eddy/utils'
 import { createEffect, createMemo, on, type Accessor } from 'solid-js'
 import { createStore } from 'solid-js/store'
-import { compileLayoutTimeline } from '~/lib/layout-resolver'
+import { compileLayoutTimeline } from '~/lib/timeline-compiler'
 import type { LayoutTimeline } from '~/lib/layout-types'
 import { createWorkerPool, type WorkerPool, type PooledWorker } from '~/lib/worker-pool'
 import type { CompositorWorkerMethods } from '~/workers/compositor.worker'
@@ -222,8 +222,7 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
     const channel = new MessageChannel()
 
     // Send port1 to compositor (compositor listens)
-    // Pass both clipId and trackId so compositor can route frames to the correct track
-    compositorRpc.connectPlaybackWorker(clipId, trackId, transfer(channel.port1))
+    compositorRpc.connectPlaybackWorker(clipId, transfer(channel.port1))
 
     // Send port2 to playback worker (playback worker sends)
     pooledWorker.rpc.connectToCompositor(clipId, transfer(channel.port2))
