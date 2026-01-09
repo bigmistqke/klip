@@ -2,9 +2,9 @@ import { rpc, transfer, type RPC } from '@bigmistqke/rpc/messenger'
 import type { Project } from '@eddy/lexicons'
 import { createAudioPipeline, type AudioPipeline } from '@eddy/mixer'
 import { debug, getGlobalPerfMonitor } from '@eddy/utils'
-import { createEffect, createMemo, on, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, on, type Accessor } from 'solid-js'
 import { createStore } from 'solid-js/store'
-import { compileLayoutTimeline } from '~/lib/timeline-compiler'
+import { compileLayoutTimeline, injectPreviewClips } from '~/lib/timeline-compiler'
 import type { LayoutTimeline } from '~/lib/layout-types'
 import { createWorkerPool, type WorkerPool, type PooledWorker } from '~/lib/worker-pool'
 import type { CompositorWorkerMethods } from '~/workers/compositor.worker'
@@ -174,8 +174,16 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
     },
   }
 
+  // Track which tracks are in preview mode
+  const [previewTracks, setPreviewTracks] = createSignal<Set<string>>(new Set())
+
   // Compile layout timeline from project (reactive)
-  const timeline = createMemo(() => compileLayoutTimeline(project(), { width, height }))
+  // Injects preview clips for tracks in preview mode
+  const timeline = createMemo(() => {
+    const _previewTracks = previewTracks()
+    const projectWithPreviews = injectPreviewClips(project(), _previewTracks)
+    return compileLayoutTimeline(projectWithPreviews, { width, height })
+  })
 
   // Worker pool for playback workers
   const workerPool = createWorkerPool({ maxSize: 8 })
@@ -555,6 +563,17 @@ export async function createPlayer(options: CreatePlayerOptions): Promise<Player
     },
 
     setPreviewSource(trackId: string, stream: MediaStream | null): void {
+      // Update preview tracks set (triggers timeline recompilation)
+      setPreviewTracks(prev => {
+        const next = new Set(prev)
+        if (stream) {
+          next.add(trackId)
+        } else {
+          next.delete(trackId)
+        }
+        return next
+      })
+
       compositor.setPreviewStream(trackId, stream)
     },
 

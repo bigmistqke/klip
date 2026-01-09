@@ -14,6 +14,7 @@ import type {
   TransitionInfo,
   Viewport,
 } from './layout-types'
+import { PREVIEW_CLIP_ID } from './layout-types'
 
 /** Canvas dimensions for viewport calculation */
 export interface CanvasSize {
@@ -219,6 +220,42 @@ function buildSegments(clipInfos: ClipInfo[]): LayoutSegment[] {
   }
 
   return segments
+}
+
+/**
+ * Inject a preview clip into a track, replacing its existing clips.
+ * Used as middleware before compilation when a track is in preview mode.
+ */
+export function injectPreviewClip(project: Project, previewTrackId: string): Project {
+  return {
+    ...project,
+    tracks: project.tracks.map(track => {
+      if (track.id !== previewTrackId) return track
+      return {
+        ...track,
+        clips: [
+          {
+            id: PREVIEW_CLIP_ID,
+            offset: 0,
+            duration: Number.MAX_SAFE_INTEGER, // Effectively infinite
+          },
+        ],
+      }
+    }),
+  }
+}
+
+/**
+ * Inject preview clips for multiple tracks.
+ */
+export function injectPreviewClips(project: Project, previewTrackIds: Set<string>): Project {
+  if (previewTrackIds.size === 0) return project
+
+  let result = project
+  for (const trackId of previewTrackIds) {
+    result = injectPreviewClip(result, trackId)
+  }
+  return result
 }
 
 /**

@@ -3,6 +3,7 @@ import { compile, glsl, uniform } from '@bigmistqke/view.gl/tag'
 import { debug } from '@eddy/utils'
 import { getActivePlacements } from '~/lib/timeline-compiler'
 import type { LayoutTimeline, Viewport } from '~/lib/layout-types'
+import { PREVIEW_CLIP_ID } from '~/lib/layout-types'
 
 const log = debug('compositor-worker', false)
 
@@ -299,12 +300,19 @@ expose<CompositorWorkerMethods>({
     // Query timeline for active placements at this time
     const activePlacements = getActivePlacements(timeline, time)
 
-    // Draw playback frames for active placements
+    // Draw all active placements (both playback and preview)
     for (const { placement } of activePlacements) {
-      const frame = playbackFrames.get(placement.clipId)
+      // Get frame from appropriate source based on clipId
+      const isPreview = placement.clipId === PREVIEW_CLIP_ID
+      const frame = isPreview
+        ? previewFrames.get(placement.trackId)
+        : playbackFrames.get(placement.clipId)
+
       if (!frame) continue
 
-      const texture = getOrCreateTexture(gl, textures, placement.clipId)
+      // Use trackId for texture key when preview (avoids collision with playback textures)
+      const textureKey = isPreview ? `preview-${placement.trackId}` : placement.clipId
+      const texture = getOrCreateTexture(gl, textures, textureKey)
 
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, texture)
@@ -312,27 +320,6 @@ expose<CompositorWorkerMethods>({
 
       // Convert viewport to WebGL coordinates (y flipped)
       const vp = viewportToWebGL(placement.viewport, canvas.height)
-      gl.viewport(vp.x, vp.y, vp.width, vp.height)
-
-      view.uniforms.u_video.set(0)
-      view.attributes.a_quad.bind()
-      gl.drawArrays(gl.TRIANGLES, 0, 6)
-    }
-
-    // Draw preview frames on top (overlay layer)
-    // Preview uses trackId since it's for camera preview during recording
-    for (const [trackId, frame] of previewFrames) {
-      // Find viewport for this track from active placements
-      const placement = activePlacements.find(p => p.placement.trackId === trackId)
-      if (!placement) continue
-
-      const texture = getOrCreateTexture(gl, textures, `preview-${trackId}`)
-
-      gl.activeTexture(gl.TEXTURE0)
-      gl.bindTexture(gl.TEXTURE_2D, texture)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame)
-
-      const vp = viewportToWebGL(placement.placement.viewport, canvas.height)
       gl.viewport(vp.x, vp.y, vp.width, vp.height)
 
       view.uniforms.u_video.set(0)

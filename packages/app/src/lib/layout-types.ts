@@ -59,6 +59,9 @@ export interface LayoutTimeline {
   segments: LayoutSegment[]
 }
 
+/** Clip ID used for preview placements */
+export const PREVIEW_CLIP_ID = 'preview'
+
 /**
  * An active placement with computed local time.
  * Returned by getActivePlacements().
