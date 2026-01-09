@@ -623,6 +623,11 @@ export function createEditor(options: CreateEditorOptions) {
       link.click()
       URL.revokeObjectURL(url)
     },
+
+    /** Load a test clip into a track (for perf testing) */
+    loadTestClip(trackId: string, blob: Blob, duration: number) {
+      addRecording(trackId, blob, duration)
+    },
   }
 }
 

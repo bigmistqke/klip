@@ -1,6 +1,6 @@
 import { expose, rpc, transfer, type RPC } from '@bigmistqke/rpc/messenger'
 import type { DemuxedSample, VideoTrackInfo } from '@eddy/codecs'
-import { debug } from '@eddy/utils'
+import { createPerfMonitor, debug } from '@eddy/utils'
 import {
   ALL_FORMATS,
   BlobSource,
@@ -10,7 +10,8 @@ import {
   type InputVideoTrack,
 } from 'mediabunny'
 
-const log = debug('playback-worker', true)
+const log = debug('playback-worker', false)
+const perf = createPerfMonitor()
 
 /** Methods exposed by compositor worker (subset we need) */
 interface CompositorFrameMethods {
@@ -41,6 +42,12 @@ export interface PlaybackWorkerMethods {
 
   /** Get current state */
   getState(): WorkerState
+
+  /** Get performance stats */
+  getPerf(): Record<string, { samples: number; avg: number; max: number; min: number; overThreshold: number }>
+
+  /** Reset performance stats */
+  resetPerf(): void
 
   /** Clean up resources */
   destroy(): void
@@ -236,14 +243,17 @@ async function initDecoder(): Promise<void> {
 
 /** Decode a sample and buffer the result */
 async function decodeAndBuffer(sample: DemuxedSample): Promise<void> {
+  perf.start('decode')
   if (!decoder || decoder.state === 'closed') {
     log('decodeAndBuffer: decoder not available', { decoderState: decoder?.state })
+    perf.end('decode')
     return
   }
 
   // Skip delta frames if decoder not ready (need keyframe first)
   if (!decoderReady && !sample.isKeyframe) {
     log('skipping delta frame, decoder not ready')
+    perf.end('decode')
     return
   }
 
@@ -318,7 +328,9 @@ async function decodeAndBuffer(sample: DemuxedSample): Promise<void> {
     while (frameBuffer.length > BUFFER_MAX_FRAMES) {
       frameBuffer.shift()
     }
+    perf.end('decode')
   } catch (error) {
+    perf.end('decode')
     log('decodeAndBuffer error', {
       error,
       errorMessage: error instanceof Error ? error.message : String(error),
@@ -343,14 +355,17 @@ async function bufferAhead(fromTime: number): Promise<void> {
   if (bufferPosition >= targetEnd) return
 
   isBuffering = true
+  perf.start('bufferAhead')
   log('bufferAhead', { fromTime, targetEnd, bufferPosition })
 
   try {
     // Get packet at current buffer position
+    perf.start('demux')
     let packet = await videoSink.getPacket(bufferPosition)
     if (!packet) {
       packet = await videoSink.getFirstPacket()
     }
+    perf.end('demux')
 
     let decoded = 0
     while (packet && packet.timestamp < targetEnd && decoded < BUFFER_AHEAD_FRAMES) {
@@ -362,11 +377,14 @@ async function bufferAhead(fromTime: number): Promise<void> {
         // Log but continue - try next packet
         log('bufferAhead: decode failed, skipping', { pts: sample.pts, error })
       }
+      perf.start('demux')
       packet = await videoSink.getNextPacket(packet)
+      perf.end('demux')
     }
   } catch (error) {
     log('bufferAhead error', { error })
   } finally {
+    perf.end('bufferAhead')
     isBuffering = false
   }
 }
@@ -435,9 +453,11 @@ function sendFrameToCompositor(time: number): void {
   }
 
   // Create VideoFrame and transfer to compositor
+  perf.start('transferFrame')
   const frame = dataToFrame(frameData)
   lastSentTimestamp = frameData.timestamp
   compositor.setFrame(trackId, transfer(frame))
+  perf.end('transferFrame')
 }
 
 /** Trim frames that are too far behind current time */
@@ -645,6 +665,14 @@ expose<PlaybackWorkerMethods>({
 
   getState() {
     return state
+  },
+
+  getPerf() {
+    return perf.getAllStats()
+  },
+
+  resetPerf() {
+    perf.reset()
   },
 
   destroy() {

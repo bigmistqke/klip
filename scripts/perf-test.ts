@@ -92,33 +92,31 @@ async function main() {
 
     // Enable console logging from the page
     page.on('console', msg => {
-      if (msg.type() === 'log' || msg.type() === 'info') {
-        const text = msg.text()
-        if (text.includes('Performance') || text.includes('perf')) {
-          console.log(`[page] ${text}`)
-        }
+      const text = msg.text()
+      // Show debug logs from our modules
+      if (
+        text.includes('[player]') ||
+        text.includes('[editor]') ||
+        text.includes('[playback-worker]') ||
+        text.includes('Performance') ||
+        text.includes('perf') ||
+        text.includes('Error') ||
+        text.includes('error')
+      ) {
+        console.log(`[page:${msg.type()}] ${text}`)
       }
     })
 
     // Navigate to editor
     console.log('📍 Navigating to editor...')
     await page.goto(`${APP_URL}/editor`, { waitUntil: 'networkidle0' })
-    await sleep(2000) // Wait for app to initialize
 
-    // Check if we're on the editor page
-    const editorExists = await page.$('[class*="compositorContainer"]')
-    if (!editorExists) {
-      console.log('⚠️  Editor not found - might need authentication')
-      console.log('   Navigate to the editor manually and try again')
-
-      // Wait for user to navigate
-      console.log('   Waiting 30s for manual navigation...')
-      await sleep(30000)
-    }
-
-    // Wait for player to initialize
-    console.log('⏳ Waiting for player to initialize...')
-    await page.waitForFunction(() => !!(window as any).__KLIP_DEBUG__?.player, { timeout: 10000 })
+    // Wait for player and editor to initialize (may take a few seconds for canvas resource)
+    console.log('⏳ Waiting for player and editor to initialize...')
+    await page.waitForFunction(
+      () => !!(window as any).__EDDY_DEBUG__?.player && !!(window as any).__EDDY_DEBUG__?.editor,
+      { timeout: 30000 },
+    )
 
     // Read video file and convert to base64
     console.log('📼 Loading test video file...')
@@ -126,39 +124,84 @@ async function main() {
     const videoBase64 = videoBuffer.toString('base64')
     const mimeType = VIDEO_PATH.endsWith('.mp4') ? 'video/mp4' : 'video/webm'
 
-    // Load video into each track using the debug interface
+    // Load video into each track using the editor (which properly updates project + player)
     console.log(`📥 Loading video into ${NUM_TRACKS} tracks...`)
 
     for (let trackIndex = 0; trackIndex < NUM_TRACKS; trackIndex++) {
-      console.log(`   Track ${trackIndex + 1}/${NUM_TRACKS}...`)
+      const trackId = `track-${trackIndex}`
+      console.log(`   Track ${trackIndex + 1}/${NUM_TRACKS} (${trackId})...`)
 
       await page.evaluate(
-        async (base64: string, mime: string, idx: number) => {
+        async (base64: string, mime: string, id: string) => {
           const binary = atob(base64)
           const bytes = new Uint8Array(binary.length)
           for (let i = 0; i < binary.length; i++) {
             bytes[i] = binary.charCodeAt(i)
           }
           const blob = new Blob([bytes], { type: mime })
-          const player = (window as any).__KLIP_DEBUG__?.player
-          if (player) {
-            await player.loadClip(idx, blob)
+          const editor = (window as any).__EDDY_DEBUG__?.editor
+          if (editor) {
+            // Use editor.loadTestClip to properly add clip to project + player
+            // Duration is estimated, will be corrected when player loads the clip
+            editor.loadTestClip(id, blob, 5000)
           }
         },
         videoBase64,
         mimeType,
-        trackIndex,
+        trackId,
       )
 
-      await sleep(500) // Wait for clip to load
+      await sleep(1000) // Wait for clip to load (needs more time for project sync)
     }
 
-    console.log('✅ All clips loaded')
+    console.log('✅ All clips loaded to project')
 
-    // Reset perf counters before test
+    // Wait and check status periodically
+    for (let i = 0; i < 10; i++) {
+      await sleep(1000)
+      const status = await page.evaluate(() => {
+        const debug = (window as any).__EDDY_DEBUG__
+        const player = debug?.player
+        return {
+          hasClip0: player?.hasClip?.('track-0'),
+          hasClip1: player?.hasClip?.('track-1'),
+          isLoading0: player?.isLoading?.('track-0'),
+          isLoading1: player?.isLoading?.('track-1'),
+        }
+      })
+      console.log(`⏳ Status check ${i + 1}/10:`, JSON.stringify(status))
+      if (status.hasClip0 && status.hasClip1) {
+        console.log('✅ Clips ready!')
+        break
+      }
+    }
+
+    const debugInfo = await page.evaluate(() => {
+      const debug = (window as any).__EDDY_DEBUG__
+      const project = debug?.editor?.project()
+      const player = debug?.player
+      return {
+        trackCount: project?.tracks?.length ?? 0,
+        tracks: project?.tracks?.map((t: any) => ({
+          id: t.id,
+          clipCount: t.clips?.length ?? 0,
+          firstClipId: t.clips?.[0]?.id,
+        })) ?? [],
+        hasClip0: player?.hasClip?.('track-0') ?? 'no hasClip',
+        hasClip1: player?.hasClip?.('track-1') ?? 'no hasClip',
+        isLoading0: player?.isLoading?.('track-0') ?? 'no isLoading',
+        isLoading1: player?.isLoading?.('track-1') ?? 'no isLoading',
+      }
+    })
+    console.log('🔍 Debug info:', JSON.stringify(debugInfo, null, 2))
+
+    // Reset perf counters before test (main + workers)
     console.log('🔄 Resetting perf counters...')
-    await page.evaluate(() => {
-      if ((window as any).eddy?.perf) {
+    await page.evaluate(async () => {
+      const player = (window as any).__EDDY_DEBUG__?.player
+      if (player?.resetPerf) {
+        player.resetPerf()
+      } else if ((window as any).eddy?.perf) {
         ;(window as any).eddy.perf.reset()
       }
     })
@@ -166,7 +209,7 @@ async function main() {
     // Start playback using debug interface
     console.log('▶️  Starting playback...')
     await page.evaluate(async () => {
-      const player = (window as any).__KLIP_DEBUG__?.player
+      const player = (window as any).__EDDY_DEBUG__?.player
       if (player) {
         await player.play(0)
       }
@@ -179,22 +222,35 @@ async function main() {
     // Stop playback
     console.log('⏹️  Stopping playback...')
     await page.evaluate(async () => {
-      const player = (window as any).__KLIP_DEBUG__?.player
+      const player = (window as any).__EDDY_DEBUG__?.player
       if (player) {
         await player.stop()
       }
     })
 
-    // Collect perf stats
+    // Collect perf stats (main + workers)
     console.log('📊 Collecting performance stats...')
-    const stats = await page.evaluate(() => {
+    const stats = await page.evaluate(async () => {
+      const player = (window as any).__EDDY_DEBUG__?.player
       const perf = (window as any).eddy?.perf
-      if (!perf) return null
 
-      return {
-        stats: perf.getAllStats(),
-        counters: perf.getCounters(),
+      if (player?.getAllPerf) {
+        // New API: get main + worker stats
+        const allStats = await player.getAllPerf()
+        return {
+          stats: allStats.main,
+          workers: allStats.workers,
+          counters: perf?.getCounters() ?? {},
+        }
+      } else if (perf) {
+        // Legacy API: main thread only
+        return {
+          stats: perf.getAllStats(),
+          workers: {},
+          counters: perf.getCounters(),
+        }
       }
+      return null
     })
 
     if (stats?.stats) {
@@ -227,6 +283,36 @@ async function main() {
 
       console.log('')
       console.log('═══════════════════════════════════════════════════════════════')
+
+      // Worker stats
+      if (stats.workers && Object.keys(stats.workers).length > 0) {
+        console.log('')
+        console.log('───────────────────────────────────────────────────────────────')
+        console.log('                     WORKER STATS (per track)')
+        console.log('───────────────────────────────────────────────────────────────')
+
+        for (const [trackId, workerStats] of Object.entries(stats.workers)) {
+          const ws = workerStats as Record<string, PerfStats>
+          if (Object.keys(ws).length === 0) continue
+
+          console.log('')
+          console.log(`  Track: ${trackId}`)
+          console.log('  Label                        │ Avg (ms) │ Max (ms) │ Samples │ Slow %')
+          console.log('  ─────────────────────────────┼──────────┼──────────┼─────────┼────────')
+
+          const sortedLabels = Object.keys(ws).sort((a, b) => ws[b].avg - ws[a].avg)
+          for (const label of sortedLabels) {
+            const s = ws[label]
+            const slowPercent = ((s.overThreshold / s.samples) * 100).toFixed(1)
+            console.log(
+              `  ${label.padEnd(29)} │ ${s.avg.toFixed(2).padStart(8)} │ ${s.max.toFixed(2).padStart(8)} │ ${String(s.samples).padStart(7)} │ ${slowPercent.padStart(5)}%`
+            )
+          }
+        }
+
+        console.log('')
+        console.log('═══════════════════════════════════════════════════════════════')
+      }
 
       // Summary
       const renderLoop = stats.stats['renderLoop']

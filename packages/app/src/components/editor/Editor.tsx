@@ -1,5 +1,5 @@
 import { FiCircle, FiPause, FiPlay, FiRepeat, FiSquare, FiUpload, FiVolume2 } from 'solid-icons/fi'
-import { type Component, createMemo, createSignal, Index, onMount, Show } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, Index, onMount, Show } from 'solid-js'
 import { createEditor } from '~/hooks/create-editor'
 import { useAuth } from '~/lib/atproto/auth-context'
 import styles from './Editor.module.css'
@@ -24,6 +24,18 @@ export const Editor: Component<EditorProps> = props => {
     get rkey() {
       return props.rkey
     },
+  })
+
+  // Expose editor for debugging and perf testing
+  // Use createEffect to wait for player initialization (which creates __EDDY_DEBUG__)
+  createEffect(() => {
+    const _player = editor.player()
+    if (_player) {
+      const debug = (window as any).__EDDY_DEBUG__
+      if (debug) {
+        debug.editor = editor
+      }
+    }
   })
 
   // Derive layout from first group (MVP: single grid layout)
