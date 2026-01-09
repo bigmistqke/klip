@@ -1,5 +1,29 @@
 [
   {
+    "hash": "d041f494242c9f449e808f65660ef880d17b9a94",
+    "short_hash": "d041f49",
+    "author": "bigmistqke",
+    "date": "2026-01-09T03:35:53+01:00",
+    "message": "feat: add perf instrumentation to playback workers\n\n- Add perf marks for decode, demux, bufferAhead, transferFrame\n- Add getPerf() and resetPerf() RPC methods to workers\n- Add loadTestClip() method to editor for perf testing\n- Expose editor via __EDDY_DEBUG__ for automated testing\n- Improve perf-test.ts with proper editor integration and status checks",
+    "files_changed": 4
+  },
+  {
+    "hash": "9b026c7061e9a2b91db46760baa28a5d9b536a62",
+    "short_hash": "9b026c7",
+    "author": "bigmistqke",
+    "date": "2026-01-09T03:35:43+01:00",
+    "message": "fix: SolidJS store mutation bug and type errors\n\n- Fix track state not updating due to direct object mutation\n  instead of using setTracks() (SolidJS stores are proxies)\n- Fix connectToCompositor argument order (trackId, port)\n- Fix Timeline -> LayoutTimeline type import\n- Add getAllPerf() to collect stats from workers",
+    "files_changed": 2
+  },
+  {
+    "hash": "43026754c1fce8c2052537a75ffba3c665cb59fe",
+    "short_hash": "4302675",
+    "author": "bigmistqke",
+    "date": "2026-01-09T02:45:57+01:00",
+    "message": "chore: add deciduous decision graph workflow",
+    "files_changed": 16
+  },
+  {
     "hash": "ab10d5ab2529330d3f59f0fc50fda3815f2cc139",
     "short_hash": "ab10d5a",
     "author": "bigmistqke",
